@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -134,11 +133,14 @@ export default function VisitorManagementPage() {
   const { user, userData, loading } = useAuth();
   const router = useRouter();
 
+  useEffect(() => {
+    if (!loading && (!user || !userData)) {
+      router.replace('/');
+    }
+  }, [user, userData, loading, router]);
+
   if (loading) return <div className="flex items-center justify-center h-screen"><p>Loading...</p></div>;
-  if (!user || !userData) {
-    router.replace('/');
-    return null;
-  }
+  if (!user || !userData) return null;
 
   return <VisitorManagementLayout userProfile={userData} />;
 }

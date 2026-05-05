@@ -1,4 +1,3 @@
-
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -21,7 +20,8 @@ import {
   User,
   CreditCard,
   Scan,
-  ShieldAlert
+  ShieldAlert,
+  Search
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,7 +29,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCollection, useMemoFirebase, signOutUser, useFirebase } from '@/firebase';
-import { collection, doc, Timestamp, setDoc, query, orderBy, getDoc } from 'firebase/firestore';
+import { collection, doc, Timestamp, setDoc, query, orderBy, getDoc, where } from 'firebase/firestore';
 import { firebaseConfig } from '@/firebase/config';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -43,7 +43,7 @@ import { divisionData } from '@/lib/divisions';
 import type { VisitorEntry, UserProfile, AuditLog, IDCard } from '@/lib/types';
 import { logAuditAction } from '@/lib/audit';
 import { SidebarProvider, Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarInset, useSidebar } from '@/components/ui/sidebar';
-import { startOfToday, subDays, format, eachDayOfInterval, startOfMonth, startOfYear, getMonth, startOfWeek, isAfter } from 'date-fns';
+import { startOfToday, subDays, format, eachDayOfInterval, startOfMonth, startOfYear, getMonth, startOfWeek, isAfter, isSameDay } from 'date-fns';
 import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -360,12 +360,101 @@ const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => 
 
 const AuditTrailView = () => {
     const { firestore } = useFirebase();
+    const [searchTerm, setSearchTerm] = useState('');
+    const [dateFilter, setDateFilter] = useState('all');
+    
     const logsQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'audit_logs'), orderBy('timestamp', 'desc')) : null), [firestore]);
     const { data: logs, isLoading } = useCollection<AuditLog>(logsQuery);
+
+    const filteredLogs = useMemo(() => {
+        if (!logs) return [];
+        let result = logs;
+
+        // Text Search
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            result = result.filter(l => 
+                l.userName.toLowerCase().includes(term) || 
+                l.action.toLowerCase().includes(term) || 
+                l.details.toLowerCase().includes(term)
+            );
+        }
+
+        // Date Filter
+        const today = startOfToday();
+        if (dateFilter === 'today') {
+            result = result.filter(l => isSameDay(l.timestamp.toDate(), today));
+        } else if (dateFilter === 'yesterday') {
+            const yesterday = subDays(today, 1);
+            result = result.filter(l => isSameDay(l.timestamp.toDate(), yesterday));
+        } else if (dateFilter === 'week') {
+            const lastWeek = subDays(today, 7);
+            result = result.filter(l => isAfter(l.timestamp.toDate(), lastWeek));
+        }
+
+        return result;
+    }, [logs, searchTerm, dateFilter]);
+
     return (
-        <Card><CardHeader><CardTitle>Audit Trail</CardTitle></CardHeader><CardContent>
-            <Table><TableHeader><TableRow><TableHead>Timestamp</TableHead><TableHead>User</TableHead><TableHead>Action</TableHead><TableHead>Details</TableHead></TableRow></TableHeader>
-            <TableBody>{logs?.map(l => (<TableRow key={l.id}><TableCell className="text-xs">{l.timestamp?.toDate().toLocaleString()}</TableCell><TableCell>{l.userName}</TableCell><TableCell><Badge variant="secondary">{l.action}</Badge></TableCell><TableCell className="text-xs">{l.details}</TableCell></TableRow>))}</TableBody></Table>
-        </CardContent></Card>
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                    <CardTitle>Audit Trail</CardTitle>
+                    <CardDescription>Comprehensive log of all system actions.</CardDescription>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input 
+                            placeholder="Search logs..." 
+                            className="pl-9 w-[250px]" 
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <Select value={dateFilter} onValueChange={setDateFilter}>
+                        <SelectTrigger className="w-[150px]">
+                            <SelectValue placeholder="Timeframe" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Time</SelectItem>
+                            <SelectItem value="today">Today</SelectItem>
+                            <SelectItem value="yesterday">Yesterday</SelectItem>
+                            <SelectItem value="week">Last 7 Days</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+            </CardHeader>
+            <CardContent>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Timestamp</TableHead>
+                            <TableHead>User</TableHead>
+                            <TableHead>Action</TableHead>
+                            <TableHead>Details</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {isLoading ? (
+                            <TableRow><TableCell colSpan={4} className="text-center">Loading logs...</TableCell></TableRow>
+                        ) : filteredLogs.length > 0 ? (
+                            filteredLogs.map(l => (
+                                <TableRow key={l.id}>
+                                    <TableCell className="text-xs whitespace-nowrap">
+                                        {l.timestamp?.toDate().toLocaleString()}
+                                    </TableCell>
+                                    <TableCell className="font-medium">{l.userName}</TableCell>
+                                    <TableCell><Badge variant="secondary">{l.action}</Badge></TableCell>
+                                    <TableCell className="text-xs opacity-80">{l.details}</TableCell>
+                                </TableRow>
+                            ))
+                        ) : (
+                            <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-8">No audit logs found matching your criteria.</TableCell></TableRow>
+                        )}
+                    </TableBody>
+                </Table>
+            </CardContent>
+        </Card>
     );
 }
