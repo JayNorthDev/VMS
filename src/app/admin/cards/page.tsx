@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -36,7 +35,6 @@ export default function CardGenerationPage() {
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [lastSequence, setLastSequence] = useState<number>(0);
 
   // Check permissions
@@ -141,11 +139,9 @@ export default function CardGenerationPage() {
         pdf.setFontSize(24);
         pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 28, { align: "center" });
 
-        // Division Names
+        // Division Name (English Only)
         pdf.setFontSize(6);
         pdf.text(division.en, pageWidth / 2, 38, { align: "center" });
-        pdf.setFontSize(5);
-        pdf.text(division.si, pageWidth / 2, 42, { align: "center" });
 
         // QR Code
         const qrUrl = await QRCode.toDataURL(qrData, { margin: 1 });
@@ -232,15 +228,6 @@ export default function CardGenerationPage() {
 
             <div className="flex flex-col gap-3 pt-4">
               <Button 
-                variant="outline"
-                className="w-full"
-                onClick={() => setIsPreviewMode(!isPreviewMode)}
-                disabled={!selectedDivisionId}
-              >
-                <Eye className="mr-2 h-4 w-4" /> {isPreviewMode ? "Hide Preview" : "Preview Design"}
-              </Button>
-              
-              <Button 
                 className="w-full" 
                 size="lg" 
                 onClick={handleGenerateCards} 
@@ -258,7 +245,7 @@ export default function CardGenerationPage() {
           </CardContent>
         </Card>
 
-        <Card className={isPreviewMode ? "ring-2 ring-primary transition-all" : "bg-muted/30"}>
+        <Card className="ring-2 ring-primary transition-all">
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               Visual Preview
@@ -288,7 +275,6 @@ export default function CardGenerationPage() {
                 
                 <div className="mt-auto w-full">
                   <p className="text-[10px] font-bold leading-tight">{selectedDivision.en}</p>
-                  <p className="text-[9px] opacity-90 leading-tight">{selectedDivision.si}</p>
                   
                   <div className="mt-4 bg-white p-2 rounded-lg inline-block shadow-inner">
                     <div className="w-20 h-20 bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">

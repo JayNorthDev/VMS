@@ -315,6 +315,21 @@ const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => 
     defaultValues: { name: "", email: "", password: "", role: "Visitor Management", permissions: [] as string[] }
   });
 
+  const selectedRole = form.watch("role");
+
+  const permissionOptions = useMemo(() => {
+    if (selectedRole === "Admin") {
+      return ["Admin Dashboard", "Active Visitors by Division", "Visitor History", "Audit Trail", "Access Management", "Card Management"];
+    } else {
+      return ["Check-In", "Active", "History"];
+    }
+  }, [selectedRole]);
+
+  // When role changes, clear current permissions to prevent cross-contamination
+  useEffect(() => {
+    form.setValue("permissions", []);
+  }, [selectedRole, form]);
+
   const onSubmit = async (values: any) => {
     if (!firestore) return;
     setIsSubmitting(true);
@@ -329,8 +344,6 @@ const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => 
     } catch (e: any) { toast({ variant: "destructive", title: "Error", description: e.message }); }
     finally { setIsSubmitting(false); }
   };
-
-  const permissionOptions = ["Admin Dashboard", "Active Visitors by Division", "Visitor History", "Audit Trail", "Access Management", "Card Management", "Check-In", "Active", "History"];
 
   return (
     <div className="space-y-8">
