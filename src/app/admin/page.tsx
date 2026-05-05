@@ -71,9 +71,9 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
   const { isMobile, setOpenMobile } = useSidebar();
   
   const availableNavItems = useMemo(() => {
-    if (!userProfile.permissions) return [];
+    if (!userProfile?.permissions) return [];
     return allNavItems.filter(item => userProfile.permissions.includes(item.permission));
-  }, [userProfile.permissions]);
+  }, [userProfile?.permissions]);
   
   const [activeView, setActiveView] = useState<AdminView>(availableNavItems[0]?.id || 'dashboard');
 
@@ -111,7 +111,7 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             ))}
-            {(userProfile.permissions.includes('Card Management') || userProfile.permissions.includes('Access Management')) && (
+            {(userProfile?.permissions?.includes('Card Management') || userProfile?.permissions?.includes('Access Management')) && (
               <SidebarMenuItem>
                 <SidebarMenuButton className="hover:bg-blue-900 text-gray-100" onClick={() => router.push('/admin/cards')}>
                   <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
@@ -121,13 +121,22 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter className="p-4 border-t border-white/10">
-           <div className="flex items-center gap-3 mb-4">
-                <div className="w-8 h-8 rounded-full bg-blue-800 flex items-center justify-center font-bold text-sm">{userProfile.name.charAt(0)}</div>
-                <div className="flex flex-col"><span className="text-sm font-semibold">{userProfile.name}</span><span className="text-[10px] opacity-60">{userProfile.role}</span></div>
-            </div>
-            <Button variant="ghost" className="w-full justify-start text-white hover:bg-red-950 hover:text-white" onClick={handleSignOut}>
-                <LogOut className="h-4 w-4 mr-2" /> Sign Out
-            </Button>
+           {userProfile && (
+             <>
+               <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-full bg-blue-800 flex items-center justify-center font-bold text-sm">
+                    {userProfile?.name?.charAt(0) || "U"}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold">{userProfile.name}</span>
+                    <span className="text-[10px] opacity-60">{userProfile.role}</span>
+                  </div>
+              </div>
+              <Button variant="ghost" className="w-full justify-start text-white hover:bg-red-950 hover:text-white" onClick={handleSignOut}>
+                  <LogOut className="h-4 w-4 mr-2" /> Sign Out
+              </Button>
+             </>
+           )}
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="flex-1 p-8">
