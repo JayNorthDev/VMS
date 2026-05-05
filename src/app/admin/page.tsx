@@ -18,7 +18,8 @@ import {
   Trash2,
   Edit,
   UserPlus,
-  User
+  User,
+  CreditCard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -95,13 +96,6 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
     }
   };
 
-  const handleExternalNavigation = (path: string) => {
-    router.push(path);
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-  }
-
   const renderContent = () => {
     const hasPermission = availableNavItems.some(item => item.id === activeView);
     if (!hasPermission) {
@@ -151,6 +145,11 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             ))}
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
+                <CreditCard /> ID Card Management
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
@@ -189,19 +188,14 @@ export default function AdminPage() {
   const { user, userData, loading } = useAuth();
   const router = useRouter();
 
-  // ROUTE PROTECTION LOGIC
   useEffect(() => {
-    // Wait until loading is complete before making any decisions
     if (!loading) {
-      // If loading is done, and there is no user, no user data, or the role is not Admin, redirect.
       if (!user || !userData || userData.role !== 'Admin') {
         router.replace('/');
       }
     }
   }, [user, userData, loading, router]);
   
-  // RENDER LOGIC
-  // While we check auth and profile, show a loading screen.
   if (loading || !user || !userData) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -210,9 +204,6 @@ export default function AdminPage() {
     );
   }
   
-  // If loading is complete AND the useEffect hasn't triggered a redirect yet,
-  // it means we have an authenticated Admin user. Render the layout.
-  // The `user` and `userData` checks ensure we don't render this for a split second before the redirect effect runs.
   if (user && userData && userData.role === 'Admin') {
     return (
       <SidebarProvider>
@@ -221,7 +212,6 @@ export default function AdminPage() {
     );
   }
 
-  // This is a fallback that will show briefly during the redirect transition, or if unauthorized.
   return null;
 }
 
@@ -1107,5 +1097,3 @@ const AuditTrailView = () => {
         </Card>
     );
 }
-
-    

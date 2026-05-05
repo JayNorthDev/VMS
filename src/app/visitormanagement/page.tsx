@@ -19,6 +19,7 @@ import {
   Search,
   BookUser,
   User,
+  CreditCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -67,7 +68,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData } from '@/lib/divisions';
-import type { Division, VisitorEntry, UserProfile } from '@/lib/types';
+import type { Division, VisitorEntry, UserProfile, IDCard } from '@/lib/types';
 import { logAuditAction } from '@/lib/audit';
 import {
   useFirebase,
@@ -78,7 +79,7 @@ import {
   WithId,
   signOutUser,
 } from '@/firebase';
-import { collection, Timestamp, doc } from 'firebase/firestore';
+import { collection, Timestamp, doc, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -90,12 +91,13 @@ const checkInSchema = z
     fullName: z.string().min(2, 'Full name must be at least 2 characters.'),
     gender: z.string().min(1, 'Gender is required.'),
     address: z.string().min(5, 'Address must be at least 5 characters.'),
+    allocatedCardId: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     const { identificationType, identificationNumber } = data;
 
     if (identificationType === 'None') {
-      return; // No validation needed
+      return; 
     }
 
     if (identificationType === 'NIC') {
@@ -357,7 +359,7 @@ const Navbar = ({
                 label="Sign Out"
                 icon={<LogOut />}
                 isActive={false}
-                onClick={handleSignOut}
+                onClick={signOutUser}
              />
         </div>
       </div>
@@ -447,6 +449,23 @@ const CheckInView = ({
   const { toast } = useToast();
   const { firestore } = useFirebase();
 
+  // Fetch available cards for the selected division
+  const [availableCards, setAvailableCards] = useState<IDCard[]>([]);
+  useEffect(() => {
+    async function fetchCards() {
+      if (!firestore || !selectedDivisionId) {
+        setAvailableCards([]);
+        return;
+      }
+      const cardsCol = collection(firestore, 'generated_id_cards');
+      const q = query(cardsCol, where('divisionId', '==', selectedDivisionId), where('status', '==', 'available'));
+      const snapshot = await getDocs(q);
+      const cards = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard));
+      setAvailableCards(cards);
+    }
+    fetchCards();
+  }, [firestore, selectedDivisionId]);
+
   const form = useForm<CheckInFormValues>({
     resolver: zodResolver(checkInSchema),
     defaultValues: {
@@ -455,6 +474,7 @@ const CheckInView = ({
       fullName: '',
       gender: '',
       address: '',
+      allocatedCardId: '',
     },
   });
   
@@ -474,6 +494,7 @@ const CheckInView = ({
   const handleDivisionSelect = (id: string, isDisabled: boolean) => {
     if (isDisabled) return;
     setSelectedDivisionId(id);
+    form.setValue('allocatedCardId', '');
   };
 
   const autoFillVisitor = () => {
@@ -521,6 +542,7 @@ const CheckInView = ({
       identificationType,
       address,
       gender,
+      allocatedCardId,
     } = tempVisitorData;
     const division = divisionData.find((d) => d.id === divisionId)!;
 
@@ -537,16 +559,26 @@ const CheckInView = ({
       divisionSinhalaName: division.si,
       divisionBackgroundColorHex: division.color,
       divisionTextColorHex: division.text,
+      allocatedCardId: allocatedCardId || null,
     };
 
     const visitorEntriesCollection = collection(firestore, 'visitorEntries');
-    addDocumentNonBlocking(visitorEntriesCollection, newEntry);
+    const docPromise = addDocumentNonBlocking(visitorEntriesCollection, newEntry);
+
+    // Update Card Status if allocated
+    if (allocatedCardId) {
+      const cardRef = doc(firestore, 'generated_id_cards', allocatedCardId);
+      updateDoc(cardRef, {
+        status: 'allocated',
+        currentVisitorId: 'pending', // Will update later if needed
+      });
+    }
 
     logAuditAction(
       firestore,
       userProfile.name,
       'Visitor Check-In',
-      `Checked in ${newEntry.fullName} to division: ${newEntry.divisionEnglishName}`
+      `Checked in ${newEntry.fullName} to division: ${newEntry.divisionEnglishName}. Card: ${allocatedCardId || 'None'}`
     );
 
     setIsModalOpen(false);
@@ -675,6 +707,42 @@ const CheckInView = ({
                     </FormItem>
                   )}
                 />
+                {selectedDivisionId && (
+                  <FormField
+                    control={form.control}
+                    name="allocatedCardId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="flex items-center gap-2">
+                          <CreditCard className="h-4 w-4" /> Allocate ID Card Number
+                        </FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          defaultValue={field.value}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select available card..." />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {availableCards.length > 0 ? (
+                              availableCards.map(card => (
+                                <SelectItem key={card.id} value={card.cardId}>
+                                  Card No: {card.cardId}
+                                </SelectItem>
+                              ))
+                            ) : (
+                              <SelectItem value="none" disabled>No cards available</SelectItem>
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -892,6 +960,14 @@ const VerificationModal = ({
           </div>
           <div className="border border-current p-4 rounded-xl bg-black/10">
             <p className="text-xs uppercase font-bold opacity-80 mb-1 tracking-wider">
+              Allocated Card
+            </p>
+            <p className="font-bold text-lg leading-tight">
+              {visitorData.allocatedCardId || 'No Card Allocated'}
+            </p>
+          </div>
+          <div className="border border-current p-4 rounded-xl bg-black/10">
+            <p className="text-xs uppercase font-bold opacity-80 mb-1 tracking-wider">
               Address
             </p>
             <p className="font-bold text-lg leading-tight">
@@ -962,11 +1038,20 @@ const ActiveVisitorsView = ({
       taskStatus: taskStatus,
     });
     
+    // De-allocate the card if it exists
+    if (visitor.allocatedCardId) {
+      const cardRef = doc(firestore, 'generated_id_cards', visitor.allocatedCardId);
+      updateDoc(cardRef, {
+        status: 'available',
+        currentVisitorId: null,
+      });
+    }
+
     logAuditAction(
       firestore,
       userProfile.name,
       'Visitor Check-Out',
-      `Checked out ${visitor.fullName}. Status: ${taskStatus}.`
+      `Checked out ${visitor.fullName}. Status: ${taskStatus}. Card ${visitor.allocatedCardId || 'N/A'} returned.`
     );
 
     toast({
@@ -1025,6 +1110,7 @@ const ActiveVisitorsView = ({
                 <TableHead className="rounded-tl-lg">Visitor Info</TableHead>
                 <TableHead>ID Number</TableHead>
                 <TableHead>Division</TableHead>
+                <TableHead>Card No</TableHead>
                 <TableHead>Time In</TableHead>
                 <TableHead className="text-center rounded-tr-lg w-[320px]">
                   Action
@@ -1116,6 +1202,11 @@ const ActiveVisitorRow = ({
             </span>
           </>
         )}
+      </TableCell>
+      <TableCell>
+        <Badge variant={visitor.allocatedCardId ? "default" : "secondary"}>
+          {visitor.allocatedCardId || 'None'}
+        </Badge>
       </TableCell>
       <TableCell>
         <div className="text-sm text-gray-900 font-medium">
@@ -1221,6 +1312,7 @@ const HistoryView = ({
               <TableHead>ID</TableHead>
               <TableHead>Gender</TableHead>
               <TableHead>Division</TableHead>
+              <TableHead>Card No</TableHead>
               <TableHead>Time In</TableHead>
               <TableHead>Time Out</TableHead>
               <TableHead className="rounded-tr-lg">Task Status</TableHead>
@@ -1271,6 +1363,9 @@ const HistoryVisitorRow = ({ visitor }: { visitor: WithId<VisitorEntry> }) => {
             {division.en}
           </span>
         )}
+      </TableCell>
+      <TableCell>
+        <Badge variant="outline">{visitor.allocatedCardId || 'None'}</Badge>
       </TableCell>
       <TableCell>
         <div className="text-sm text-gray-900 font-medium">

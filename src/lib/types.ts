@@ -1,3 +1,4 @@
+
 import { Timestamp } from "firebase/firestore";
 
 export interface Division {
@@ -27,6 +28,7 @@ export interface VisitorEntry {
   divisionBackgroundColorHex?: string;
   divisionTextColorHex?: string;
   duration?: string;
+  allocatedCardId?: string | null;
 }
 
 export interface UserProfile {
@@ -43,4 +45,15 @@ export interface AuditLog {
   userName: string;
   action: string;
   details: string;
+}
+
+export interface IDCard {
+  id: string; // Firestore Document ID
+  cardId: string; // Human-readable ID (e.g., SP-001)
+  divisionId: string;
+  qrCodeData: string; // Encrypted string
+  status: 'available' | 'allocated' | 'lost';
+  currentVisitorId?: string | null;
+  currentLogId?: string | null;
+  createdAt: Timestamp;
 }

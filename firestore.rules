@@ -1,115 +1,55 @@
-/**
- * Core Philosophy: This ruleset governs a Visitor Management System. The security model is based on a simple, trusted-user paradigm where any authenticated user is considered an authorized staff member with the ability to manage visitor entries. The primary goal is to allow staff to perform their duties (checking visitors in and out) while protecting core system configuration from accidental or malicious modification.
- *
- * Data Structure: The data is organized into two distinct, top-level collections:
- * - `/divisions/{divisionId}`: Stores static configuration data for each department. This data is treated as read-only for all staff to prevent tampering.
- * - `/visitorEntries/{visitorEntryId}`: A comprehensive log of all visitor check-ins and check-outs. All staff members have full read and write access to this collection to facilitate the application's core functionality.
- *
- * Key Security Decisions:
- * - Any Authenticated User is Staff: The system operates on the assumption that any user who has successfully signed in is a trusted staff member. Access control is therefore based on authentication status (`request.auth != null`) rather than specific user roles.
- * - Configuration is Read-Only: The `/divisions` collection is immutable for client-side users. This is a critical security measure to ensure the stability and integrity of the system's operational parameters (e.g., division names, capacity). Changes to divisions must be made through a trusted server environment or directly in the Firebase console.
- * - No Deletion of Records: To maintain a complete and auditable history of visitor activity, the `delete` operation on `/visitorEntries` is explicitly disallowed. Visitor check-outs are handled by updating a `status` field.
- *
- * Denormalization for Authorization: The `firestore.reasoning` section from the backend design specifies that key data from a division (like its name and color) should be copied into the `visitorEntry` document upon creation. This design choice is fully supported by these rules, as it means rules for `/visitorEntries` are self-contained and do not need to perform slow and costly `get()` operations on the `/divisions` collection.
- *
- * Structural Segregation: The use of separate top-level collections for configuration (`/divisions`) and transactional data (`/visitorEntries`) creates a clean separation of concerns. This allows for simple, powerful, and distinct security postures for each data type.
- */
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper Functions
-
-    /**
-     * Checks if a user is authenticated.
-     * This is the primary authorization check for this application, assuming
-     * all signed-in users are trusted staff members.
-     */
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /**
-     * @description
-     *   Rules for the 'divisions' collection, which stores static configuration data for each police station department.
-     *   This data is publicly readable by any authenticated staff member but is not writable from the client-side.
-     * @path /divisions/{divisionId}
-     * @allow (get) A signed-in staff member fetching a specific division's details to display them in the UI.
-     * @deny (create) An authenticated user attempting to create a new division document, which is a restricted administrative action.
-     * @principle Protects critical system configuration by making it read-only for clients, preventing unauthorized modification.
-     */
+    function isUserAdmin(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role == 'Admin';
+    }
+
     match /divisions/{divisionId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      // CRITICAL: Writes are disabled. Division data is configuration and should only be changed
-      // by an administrator, likely through the Firebase Console or a trusted backend environment.
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
-    /**
-     * @description
-     *   Rules for the 'visitorEntries' collection, which logs every visitor check-in and check-out.
-     *   Any authenticated staff member can create new entries (check-in), update existing ones (check-out), and read all entries to populate the 'Active' and 'History' views.
-     * @path /visitorEntries/{visitorEntryId}
-     * @allow (create) An authenticated staff member creating a new visitor entry when a visitor arrives.
-     * @deny (delete) A staff member attempting to permanently delete a visitor record, which is disallowed to maintain an audit trail.
-     * @principle Enables collaborative data management for all authenticated users, treating them as trusted operators of the system.
-     */
     match /visitorEntries/{visitorEntryId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isSignedIn();
-      // Updates are allowed for check-out. The document must exist to be updated.
       allow update: if isSignedIn() && resource != null;
-      // Deletion is disallowed to preserve a complete history of visitor entries for auditing purposes.
       allow delete: if false;
     }
 
-    // Helper function to check if the requesting user is an Admin.
-    function isUserAdmin(userId) {
-      return get(/databases/$(database)/documents/users/$(userId)).data.role == 'Admin';
-    }
-
     match /users/{userId} {
-      // An Admin can read any user profile. A non-admin can only read their own.
       allow get: if isSignedIn() && (isUserAdmin(request.auth.uid) || request.auth.uid == userId);
-      // Only Admins can list all users.
       allow list: if isSignedIn() && isUserAdmin(request.auth.uid);
-
-      // Creation is allowed for two cases:
-      // 1. An Admin is creating a new user.
-      // 2. The initial seeding of the first two test accounts.
-      allow create: if isSignedIn() &&
-                      (
-                        isUserAdmin(request.auth.uid) ||
-                        (
-                          request.auth.uid == userId &&
-                          (
-                            (request.resource.data.email == 'policevms@admin.com' && request.resource.data.role == 'Admin') ||
-                            (request.resource.data.email == 'policevms@visitormanagement.com' && request.resource.data.role == 'Visitor Management')
-                          ) &&
-                          request.resource.data.keys().hasAll(['email', 'role']) && request.resource.data.size() == 2
-                        )
-                      );
-
-      // Only Admins can update or delete user roles/permissions.
+      allow create: if isSignedIn() && isUserAdmin(request.auth.uid);
       allow update, delete: if isSignedIn() && isUserAdmin(request.auth.uid);
     }
     
     match /audit_logs/{auditLogId} {
-      // Admins can read the audit trail.
       allow get: if isSignedIn() && isUserAdmin(request.auth.uid);
       allow list: if isSignedIn() && isUserAdmin(request.auth.uid);
-
-      // Any authenticated user can create a log entry. This is safe because
-      // the data being written is controlled by trusted client-side functions.
       allow create: if isSignedIn();
-
-      // Logs are immutable to maintain integrity.
       allow update: if false;
       allow delete: if false;
+    }
+
+    match /generated_id_cards/{cardId} {
+      // Any authenticated staff can read available cards for check-in or allocated for check-out
+      allow get, list: if isSignedIn();
+      // Only admins can generate cards (bulk creation)
+      allow create: if isSignedIn() && isUserAdmin(request.auth.uid);
+      // Staff can update card status (allocate/de-allocate)
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && isUserAdmin(request.auth.uid);
     }
   }
 }
