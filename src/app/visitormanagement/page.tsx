@@ -24,6 +24,14 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardDescription,
+  CardFooter,
+} from '@/components/ui/card';
+import {
   Form,
   FormControl,
   FormField,
