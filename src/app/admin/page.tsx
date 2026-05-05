@@ -19,7 +19,9 @@ import {
   Edit,
   UserPlus,
   User,
-  CreditCard
+  CreditCard,
+  Scan,
+  ShieldAlert
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -27,7 +29,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCollection, useMemoFirebase, signOutUser, useFirebase } from '@/firebase';
-import { collection, doc, Timestamp, setDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, Timestamp, setDoc, query, orderBy, getDoc } from 'firebase/firestore';
 import { firebaseConfig } from '@/firebase/config';
 import { initializeApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -38,16 +40,19 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData } from '@/lib/divisions';
-import type { VisitorEntry, UserProfile, AuditLog } from '@/lib/types';
+import type { VisitorEntry, UserProfile, AuditLog, IDCard } from '@/lib/types';
 import { logAuditAction } from '@/lib/audit';
 import { SidebarProvider, Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarInset, useSidebar } from '@/components/ui/sidebar';
 import { startOfToday, subDays, format, eachDayOfInterval, startOfMonth, startOfYear, getMonth, startOfWeek, isAfter } from 'date-fns';
-import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, Sector } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { useAuth } from '@/hooks/useAuth';
+import { QRScanner } from '@/components/qr-scanner';
+import { decryptQRData } from '@/lib/qr-security';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 
 type AdminView = 'dashboard' | 'active_visitors' | 'history' | 'access_management' | 'audit_trail';
@@ -72,112 +77,60 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
   
   const [activeView, setActiveView] = useState<AdminView>(availableNavItems[0]?.id || 'dashboard');
 
-  useEffect(() => {
-    if (availableNavItems.length > 0 && !availableNavItems.some(item => item.id === activeView)) {
-      setActiveView(availableNavItems[0].id);
-    }
-  }, [availableNavItems, activeView]);
-
-  const visitorEntriesQuery = useMemoFirebase(
-    () => (firestore ? collection(firestore, 'visitorEntries') : null),
-    [firestore]
-  );
+  const visitorEntriesQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'visitorEntries') : null), [firestore]);
   const { data: allVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
 
-  const handleSignOut = async () => {
-    await signOutUser();
-    router.replace('/');
-  };
-
-  const handleNavigation = (view: AdminView) => {
-    setActiveView(view);
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-  };
+  const handleSignOut = async () => { await signOutUser(); router.replace('/'); };
 
   const renderContent = () => {
-    const hasPermission = availableNavItems.some(item => item.id === activeView);
-    if (!hasPermission) {
-        return (
-             <Card>
-                <CardHeader>
-                    <CardTitle>Access Denied</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <p>You do not have permission to view this section. Please contact an administrator.</p>
-                </CardContent>
-            </Card>
-        )
-    }
-
     switch (activeView) {
-      case 'dashboard':
-        return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
-      case 'active_visitors':
-        return <ActiveVisitorsByDivisionView allVisitors={allVisitors || []} />;
-      case 'history':
-        return <HistoryView allVisitors={allVisitors || []} isLoading={visitorsLoading} userProfile={userProfile} />;
-      case 'access_management':
-        return <AccessManagementView userProfile={userProfile} />;
-      case 'audit_trail':
-        return <AuditTrailView />;
-      default:
-        return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
+      case 'dashboard': return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
+      case 'active_visitors': return <ActiveVisitorsByDivisionView allVisitors={allVisitors || []} />;
+      case 'history': return <HistoryView allVisitors={allVisitors || []} isLoading={visitorsLoading} userProfile={userProfile} />;
+      case 'access_management': return <AccessManagementView userProfile={userProfile} />;
+      case 'audit_trail': return <AuditTrailView />;
+      default: return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
     }
   }
 
   return (
     <div className="flex min-h-screen bg-gray-100 dark:bg-gray-900">
-      <Sidebar className="flex flex-col">
-        <SidebarHeader>
+      <Sidebar className="flex flex-col bg-blue-950 text-white">
+        <SidebarHeader className="p-6">
           <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="Police VMS Logo" width={40} height={40} />
-            <h1 className="text-xl font-bold">Admin Panel</h1>
+            <Image src="/logo.png" alt="Logo" width={40} height={40} />
+            <div className="flex flex-col"><h1 className="text-xl font-bold leading-none">Admin Panel</h1><span className="text-[10px] opacity-60 uppercase tracking-widest">Badulla Police Station</span></div>
           </div>
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="px-3">
           <SidebarMenu>
             {availableNavItems.map(item => (
                  <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton isActive={activeView === item.id} onClick={() => handleNavigation(item.id as AdminView)}>
-                        {item.icon} {item.label}
+                    <SidebarMenuButton className="hover:bg-blue-900 text-gray-100" isActive={activeView === item.id} onClick={() => setActiveView(item.id)}>
+                        {item.icon} <span className="ml-2 font-medium">{item.label}</span>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             ))}
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
-                <CreditCard /> ID Card Management
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {(userProfile.permissions.includes('Card Management') || userProfile.permissions.includes('Access Management')) && (
+              <SidebarMenuItem>
+                <SidebarMenuButton className="hover:bg-blue-900 text-gray-100" onClick={() => router.push('/admin/cards')}>
+                  <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarContent>
-        <SidebarFooter>
-           <div className="flex items-center gap-3 p-2 border-t border-sidebar-border">
-                <User className="w-6 h-6"/>
-                <div className="flex flex-col">
-                    <span className="text-sm font-medium">{userProfile.name}</span>
-                    <span className="text-xs text-gray-400">{userProfile.role}</span>
-                </div>
+        <SidebarFooter className="p-4 border-t border-white/10">
+           <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-full bg-blue-800 flex items-center justify-center font-bold text-sm">{userProfile.name.charAt(0)}</div>
+                <div className="flex flex-col"><span className="text-sm font-semibold">{userProfile.name}</span><span className="text-[10px] opacity-60">{userProfile.role}</span></div>
             </div>
-           <SidebarMenu>
-              <SidebarMenuItem>
-                  <SidebarMenuButton onClick={handleSignOut} className="w-full justify-start">
-                      <LogOut />
-                      Sign Out
-                  </SidebarMenuButton>
-              </SidebarMenuItem>
-          </SidebarMenu>
+            <Button variant="ghost" className="w-full justify-start text-white hover:bg-red-950 hover:text-white" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-2" /> Sign Out
+            </Button>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="flex-1 p-4 sm:p-6 lg:p-8">
-         <header className="flex items-center justify-between md:hidden mb-4 p-2 bg-white dark:bg-gray-800 rounded-md shadow">
-          <div className="flex items-center gap-2">
-               <Image src="/logo.png" alt="Police VMS Logo" width={32} height={32} />
-               <span className="font-bold">Admin Panel</span>
-          </div>
-           <SidebarTrigger />
-         </header>
+      <SidebarInset className="flex-1 p-8">
         {renderContent()}
       </SidebarInset>
     </div>
@@ -188,912 +141,222 @@ export default function AdminPage() {
   const { user, userData, loading } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!loading) {
-      if (!user || !userData || userData.role !== 'Admin') {
-        router.replace('/');
-      }
-    }
-  }, [user, userData, loading, router]);
+  if (loading) return <div className="flex items-center justify-center h-screen"><p>Loading...</p></div>;
+  if (!user || !userData || userData.role !== 'Admin') { router.replace('/'); return null; }
   
-  if (loading || !user || !userData) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <p>Loading...</p>
-      </div>
-    );
-  }
-  
-  if (user && userData && userData.role === 'Admin') {
-    return (
-      <SidebarProvider>
-        <AdminLayout userProfile={userData} />
-      </SidebarProvider>
-    );
-  }
-
-  return null;
+  return <SidebarProvider><AdminLayout userProfile={userData} /></SidebarProvider>;
 }
 
-
-// --- Admin Sub-Views ---
-
 const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[], isLoading: boolean }) => {
-    const [trendFilter, setTrendFilter] = useState('week');
-    
-    const stats = useMemo(() => {
-        if (isLoading || !allVisitors) {
-            return { completedToday: 0, pendingToday: 0, active: 0, today: 0 };
-        }
-        
-        const todayStart = startOfToday();
-        
-        const todaysCheckIns = allVisitors.filter(v => v.checkInTime.toDate() >= todayStart).length;
-        const activeVisitorsCount = allVisitors.filter(v => v.status === 'IN').length;
-        
-        const checkedOutToday = allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart);
-        
-        const completedToday = checkedOutToday.filter(v => v.taskStatus === 'Completed').length;
-        const pendingToday = checkedOutToday.filter(v => v.taskStatus === 'Incomplete').length;
+    const { firestore } = useFirebase();
+    const [isVerifying, setIsVerifying] = useState(false);
+    const [scannedCard, setScannedCard] = useState<{ card: IDCard, visitor?: VisitorEntry | null } | null>(null);
+    const { toast } = useToast();
 
-        return {
-            completed: completedToday,
-            pending: pendingToday,
-            active: activeVisitorsCount,
-            today: todaysCheckIns,
+    const handleVerifyScan = async (decodedText: string) => {
+      const decrypted = decryptQRData(decodedText);
+      if (!decrypted.includes('verify-police-vms')) {
+        toast({ variant: 'destructive', title: 'Security Alert', description: 'This card was not issued by Badulla Police Station.' });
+        return;
+      }
+      const [cardId] = decrypted.split('|');
+      setIsVerifying(false);
+      
+      if (!firestore) return;
+      const cardSnap = await getDoc(doc(firestore, 'generated_id_cards', cardId));
+      if (cardSnap.exists()) {
+        const cardData = cardSnap.data() as IDCard;
+        let visitorData = null;
+        if (cardData.status === 'allocated') {
+          const activeVisitor = allVisitors.find(v => v.status === 'IN' && v.allocatedCardId === cardId);
+          visitorData = activeVisitor || null;
         }
-    }, [allVisitors, isLoading]);
+        setScannedCard({ card: cardData, visitor: visitorData });
+      } else {
+        toast({ variant: 'destructive', title: 'Not Found', description: 'This card ID does not exist in our database.' });
+      }
+    };
+
+    const stats = useMemo(() => {
+        const todayStart = startOfToday();
+        return {
+            today: allVisitors.filter(v => v.checkInTime.toDate() >= todayStart).length,
+            active: allVisitors.filter(v => v.status === 'IN').length,
+            completed: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.taskStatus === 'Completed').length,
+            pending: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.taskStatus === 'Incomplete').length,
+        }
+    }, [allVisitors]);
 
     return (
-        <div>
-            <h1 className="text-2xl font-bold mb-6">Dashboard</h1>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-6">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Visitors Today</CardTitle>
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{isLoading ? '...' : stats.today}</div>
-                        <p className="text-xs text-muted-foreground">Total check-ins for today</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Active Visitors</CardTitle>
-                        <UserCheck className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{isLoading ? '...' : stats.active}</div>
-                        <p className="text-xs text-muted-foreground">Currently inside</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Tasks Completed Today</CardTitle>
-                        <BadgeCheck className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{isLoading ? '...' : stats.completed}</div>
-                        <p className="text-xs text-muted-foreground">Checked out with completed task</p>
-                    </CardContent>
-                </Card>
-                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Tasks Pending Today</CardTitle>
-                        <BadgeAlert className="h-4 w-4 text-orange-500" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{isLoading ? '...' : stats.pending}</div>
-                        <p className="text-xs text-muted-foreground">Checked out with pending task</p>
-                    </CardContent>
-                </Card>
+        <div className="space-y-6">
+            <div className="flex justify-between items-end">
+              <div><h1 className="text-3xl font-bold">Admin Dashboard</h1><p className="text-muted-foreground">Comprehensive overview of station traffic and logs.</p></div>
+              <Button size="lg" className="bg-blue-950" onClick={() => setIsVerifying(true)}><Scan className="mr-2 h-5 w-5" /> Verify Card</Button>
             </div>
-            <Card className="mb-6">
-                 <CardHeader>
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                      <div>
-                        <CardTitle>Visitor Trends</CardTitle>
-                        <CardDescription>Visitor check-ins over time.</CardDescription>
-                      </div>
-                      <Tabs value={trendFilter} onValueChange={setTrendFilter} className="w-full sm:w-auto">
-                          <TabsList className="grid w-full grid-cols-3">
-                              <TabsTrigger value="week">Week</TabsTrigger>
-                              <TabsTrigger value="month">Month</TabsTrigger>
-                              <TabsTrigger value="year">Year</TabsTrigger>
-                          </TabsList>
-                      </Tabs>
+            
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                <Card><CardHeader className="pb-2 flex flex-row justify-between"><CardTitle className="text-sm font-medium">Today's Total</CardTitle><Users className="h-4 w-4 text-muted-foreground"/></CardHeader><CardContent><div className="text-2xl font-bold">{isLoading ? '...' : stats.today}</div></CardContent></Card>
+                <Card><CardHeader className="pb-2 flex flex-row justify-between"><CardTitle className="text-sm font-medium">Currently Inside</CardTitle><UserCheck className="h-4 w-4 text-blue-500"/></CardHeader><CardContent><div className="text-2xl font-bold">{isLoading ? '...' : stats.active}</div></CardContent></Card>
+                <Card><CardHeader className="pb-2 flex flex-row justify-between"><CardTitle className="text-sm font-medium">Tasks Completed</CardTitle><BadgeCheck className="h-4 w-4 text-green-500"/></CardHeader><CardContent><div className="text-2xl font-bold">{isLoading ? '...' : stats.completed}</div></CardContent></Card>
+                <Card><CardHeader className="pb-2 flex flex-row justify-between"><CardTitle className="text-sm font-medium">Tasks Pending</CardTitle><BadgeAlert className="h-4 w-4 text-orange-500"/></CardHeader><CardContent><div className="text-2xl font-bold">{isLoading ? '...' : stats.pending}</div></CardContent></Card>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-3">
+                <Card className="md:col-span-2"><CardHeader><CardTitle>Division Distribution</CardTitle></CardHeader><CardContent className="h-80"><DivisionVisitorsChart visitors={allVisitors}/></CardContent></Card>
+                <Card><CardHeader><CardTitle>Identification Overview</CardTitle><CardDescription>Visitors with vs. without ID.</CardDescription></CardHeader><CardContent className="h-80"><IdentificationOverviewChart visitors={allVisitors}/></CardContent></Card>
+            </div>
+
+            {isVerifying && (
+              <Dialog open={isVerifying} onOpenChange={setIsVerifying}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader><DialogTitle>Verify System Card</DialogTitle><DialogDescription>Scan a visitor ID card to check its real-time status and ownership.</DialogDescription></DialogHeader>
+                  <QRScanner onScanSuccess={handleVerifyScan} />
+                </DialogContent>
+              </Dialog>
+            )}
+
+            {scannedCard && (
+              <Dialog open={!!scannedCard} onOpenChange={() => setScannedCard(null)}>
+                <DialogContent className="sm:max-w-lg">
+                  <DialogHeader><DialogTitle className="flex items-center gap-2"><CreditCard /> Card Verification</DialogTitle></DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="flex justify-between items-center p-4 rounded-lg bg-muted">
+                      <div><div className="text-xs uppercase opacity-60">Card ID</div><div className="text-xl font-black">{scannedCard.card.cardId}</div></div>
+                      <Badge variant={scannedCard.card.status === 'available' ? 'default' : 'destructive'} className="h-8 px-4 text-sm">{scannedCard.card.status.toUpperCase()}</Badge>
                     </div>
-                </CardHeader>
-                <CardContent className='h-96'>
-                    <VisitorTrendsChart visitors={allVisitors} filter={trendFilter} />
-                </CardContent>
-            </Card>
-            <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Visitors by Division</CardTitle>
-                        <CardDescription>Total visitor distribution across divisions.</CardDescription>
-                    </CardHeader>
-                    <CardContent className='h-96'>
-                        <DivisionVisitorsChart visitors={allVisitors} />
-                    </CardContent>
-                </Card>
-                 <Card>
-                    <CardHeader>
-                        <CardTitle>Task Status Distribution</CardTitle>
-                        <CardDescription>Breakdown of all completed vs. pending tasks.</CardDescription>
-                    </CardHeader>
-                    <CardContent className='h-96'>
-                        <TaskStatusChart visitors={allVisitors} />
-                    </CardContent>
-                </Card>
-                 <Card className="md:col-span-2">
-                    <CardHeader>
-                        <CardTitle>Identification Overview</CardTitle>
-                        <CardDescription>Breakdown of visitors with and without ID.</CardDescription>
-                    </CardHeader>
-                    <CardContent className='h-96'>
-                        <IdentificationOverviewChart visitors={allVisitors} />
-                    </CardContent>
-                </Card>
-            </div>
+                    {scannedCard.visitor ? (
+                      <div className="space-y-3">
+                        <div className="text-sm font-bold border-b pb-1">Current Active Visitor</div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-blue-50 p-3 rounded-lg"><div className="text-xs opacity-60">Name</div><div className="font-bold">{scannedCard.visitor.fullName}</div></div>
+                          <div className="bg-blue-50 p-3 rounded-lg"><div className="text-xs opacity-60">Identification</div><div className="font-bold">{scannedCard.visitor.identificationNumber}</div></div>
+                        </div>
+                        <div className="bg-blue-50 p-3 rounded-lg"><div className="text-xs opacity-60">Check-In Time</div><div className="font-bold">{scannedCard.visitor.checkInTime.toDate().toLocaleString()}</div></div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-8 text-center bg-green-50 rounded-lg">
+                        <BadgeCheck className="h-12 w-12 text-green-600 mb-2" />
+                        <h4 className="font-bold">Card is Available</h4>
+                        <p className="text-sm text-muted-foreground">This card is not currently assigned to any visitor.</p>
+                      </div>
+                    )}
+                  </div>
+                  <Button onClick={() => setScannedCard(null)} className="w-full">Close Report</Button>
+                </DialogContent>
+              </Dialog>
+            )}
         </div>
     )
 }
 
-const VisitorTrendsChart = ({ visitors, filter }: { visitors: VisitorEntry[], filter: string }) => {
-    const trendData = useMemo(() => {
-        if (!visitors) return [];
-        const now = new Date();
-
-        if (filter === 'year') {
-            const yearStart = startOfYear(now);
-            const visitorsThisYear = visitors.filter(v => v.checkInTime.toDate() >= yearStart);
-            const monthlyCounts: Record<number, number> = {};
-            
-            visitorsThisYear.forEach(v => {
-                const month = getMonth(v.checkInTime.toDate());
-                monthlyCounts[month] = (monthlyCounts[month] || 0) + 1;
-            });
-
-            return Array.from({ length: 12 }).map((_, i) => ({
-                name: format(new Date(now.getFullYear(), i), 'MMM'),
-                visitors: monthlyCounts[i] || 0
-            }));
-        }
-
-        const days = filter === 'week' ? 7 : 30;
-        const startDate = subDays(now, days - 1);
-        const dateRange = eachDayOfInterval({ start: startDate, end: now });
-
-        const dailyCounts = visitors.reduce((acc, v) => {
-            const dayKey = format(v.checkInTime.toDate(), 'yyyy-MM-dd');
-            acc[dayKey] = (acc[dayKey] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-
-        return dateRange.map(day => ({
-            name: format(day, days === 7 ? 'EEE' : 'MMM d'),
-            visitors: dailyCounts[format(day, 'yyyy-MM-dd')] || 0
-        }));
-
-    }, [visitors, filter]);
-
-    return (
-        <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trendData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip
-                    contentStyle={{
-                        backgroundColor: 'hsl(var(--background))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 'var(--radius)',
-                    }}
-                />
-                <Line type="monotone" dataKey="visitors" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-            </LineChart>
-        </ResponsiveContainer>
-    );
-};
-
 const DivisionVisitorsChart = ({ visitors }: { visitors: VisitorEntry[] }) => {
     const chartData = useMemo(() => {
-        if (!visitors) return [];
-        const divisionCounts = visitors.reduce((acc, v) => {
-            acc[v.divisionId] = (acc[v.divisionId] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
-
-        return divisionData.map(div => ({
-            name: div.en,
-            visitors: divisionCounts[div.id] || 0,
-            fill: div.color
-        })).sort((a,b) => b.visitors - a.visitors);
-
+        const divisionCounts = visitors.reduce((acc, v) => { acc[v.divisionId] = (acc[v.divisionId] || 0) + 1; return acc; }, {} as Record<string, number>);
+        return divisionData.map(div => ({ name: div.en, visitors: divisionCounts[div.id] || 0, fill: div.color })).sort((a,b) => b.visitors - a.visitors);
     }, [visitors]);
-
     return (
-        <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, left: 60, bottom: 5 }}>
-                 <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
-                <YAxis type="category" dataKey="name" width={120} fontSize={10} tickLine={false} axisLine={false} />
-                <Tooltip
-                    cursor={{ fill: 'hsla(var(--muted))' }}
-                     contentStyle={{
-                        backgroundColor: 'hsl(var(--background))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 'var(--radius)',
-                    }}
-                />
-                <Bar dataKey="visitors" radius={[0, 4, 4, 0]}>
-                    {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.fill} />
-                    ))}
-                </Bar>
-            </BarChart>
-        </ResponsiveContainer>
-    );
-};
-
-const TaskStatusChart = ({ visitors }: { visitors: VisitorEntry[] }) => {
-    const chartData = useMemo(() => {
-        if (!visitors) return [{ name: 'N/A', value: 1 }];
-        const completed = visitors.filter(v => v.taskStatus === 'Completed').length;
-        const incomplete = visitors.filter(v => v.taskStatus === 'Incomplete').length;
-        if (completed === 0 && incomplete === 0) return [];
-        return [
-            { name: 'Completed', value: completed },
-            { name: 'Incomplete', value: incomplete },
-        ];
-    }, [visitors]);
-
-    const COLORS = ['hsl(var(--chart-2))', 'hsl(var(--chart-5))']; // Green, Orange
-
-    return (
-        <ResponsiveContainer width="100%" height="100%">
-             {chartData.length > 0 ? (
-            <PieChart>
-                <Pie
-                    data={chartData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                    {chartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                </Pie>
-                <Tooltip
-                     contentStyle={{
-                        backgroundColor: 'hsl(var(--background))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 'var(--radius)',
-                    }}
-                />
-                <Legend />
-            </PieChart>
-            ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                    No task status data available.
-                </div>
-            )}
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height="100%"><BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}><CartesianGrid strokeDasharray="3 3" horizontal={false}/><XAxis type="number" fontSize={12}/><YAxis type="category" dataKey="name" width={120} fontSize={10}/><Tooltip/><Bar dataKey="visitors" radius={[0, 4, 4, 0]}/></BarChart></ResponsiveContainer>
     );
 };
 
 const IdentificationOverviewChart = ({ visitors }: { visitors: VisitorEntry[] }) => {
-    const chartData = useMemo(() => {
-        if (!visitors || visitors.length === 0) return [];
-
+    const data = useMemo(() => {
         const withId = visitors.filter(v => v.identificationType !== 'None').length;
         const withoutId = visitors.filter(v => v.identificationType === 'None').length;
-        
-        if (withId === 0 && withoutId === 0) return [];
-        
-        return [
-            { name: 'With ID', value: withId },
-            { name: 'Without ID', value: withoutId },
-        ];
+        return [{ name: 'With ID', value: withId }, { name: 'No ID', value: withoutId }];
     }, [visitors]);
-
-    const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-3))'];
-
+    const COLORS = ['hsl(var(--chart-2))', 'hsl(var(--chart-5))'];
     return (
-        <ResponsiveContainer width="100%" height="100%">
-            {chartData.length > 0 ? (
-                <PieChart>
-                    <Pie
-                        data={chartData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={100}
-                        fill="#8884d8"
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    >
-                        {chartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                    </Pie>
-                    <Tooltip
-                        contentStyle={{
-                            backgroundColor: 'hsl(var(--background))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: 'var(--radius)',
-                        }}
-                    />
-                    <Legend />
-                </PieChart>
-            ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                    No identification data available.
-                </div>
-            )}
-        </ResponsiveContainer>
+        <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value"><Cell fill={COLORS[0]} /><Cell fill={COLORS[1]} /></Pie><Tooltip/><Legend verticalAlign="bottom" height={36}/></PieChart></ResponsiveContainer>
     );
 };
 
-
 const ActiveVisitorsByDivisionView = ({ allVisitors }: { allVisitors: VisitorEntry[] }) => {
-   const divisionStats = useMemo(() => {
-    if (!allVisitors) return [];
-    return divisionData.map(division => {
-      const visitorsInDivision = allVisitors.filter(v => v.divisionId === division.id);
-      const activeCount = visitorsInDivision.filter(v => v.status === 'IN').length;
-      return { ...division, activeCount };
-    });
-  }, [allVisitors]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Active Visitors by Division</CardTitle>
-        <CardDescription>Real-time count of visitors inside each division.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {divisionStats.map(div => (
-            <div key={div.id} className="p-4 rounded-lg border flex items-center justify-between" style={{ backgroundColor: div.color, color: div.text }}>
-              <div>
-                <p className="font-bold text-lg">{div.en}</p>
-                <p className="text-xs opacity-80">{div.si}</p>
-              </div>
-              <div className="text-3xl font-extrabold">{div.activeCount}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  )
+   const stats = useMemo(() => divisionData.map(div => ({ ...div, count: allVisitors.filter(v => v.status === 'IN' && v.divisionId === div.id).length })), [allVisitors]);
+   return (
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {stats.map(div => (
+        <Card key={div.id} style={{ backgroundColor: div.color, color: div.text }}><CardHeader className="pb-2"><CardTitle className="text-sm font-bold">{div.en}</CardTitle></CardHeader><CardContent><div className="text-3xl font-black">{div.count}</div></CardContent></Card>
+      ))}
+    </div>
+   )
 }
 
 const HistoryView = ({ allVisitors, isLoading, userProfile }: { allVisitors: VisitorEntry[], isLoading: boolean, userProfile: UserProfile }) => {
-    const { firestore } = useFirebase();
-    const [historyFilter, setHistoryFilter] = useState('week');
-    const [historySearch, setHistorySearch] = useState('');
-
-    const historyWithDuration = useMemo(() => {
-        if (!allVisitors) return [];
-        let history = allVisitors
-            .filter(v => v.status === 'OUT' && v.checkOutTime)
-            .map(v => {
-                const durationMs = v.checkOutTime!.toMillis() - v.checkInTime.toMillis();
-                const minutes = Math.floor(durationMs / 60000);
-                const seconds = Math.floor((durationMs % 60000) / 1000);
-                return { ...v, duration: `${minutes}m ${seconds}s` };
-            })
-            .sort((a, b) => b.checkOutTime!.toMillis() - a.checkOutTime!.toMillis());
-        
-        const now = new Date();
-        if (historyFilter === 'week') {
-            const startOfThisWeek = startOfWeek(now);
-            history = history.filter(v => v.checkOutTime!.toDate() && isAfter(v.checkOutTime!.toDate(), startOfThisWeek));
-        } else if (historyFilter === 'month') {
-            const startOfThisMonth = startOfMonth(now);
-            history = history.filter(v => v.checkOutTime!.toDate() && isAfter(v.checkOutTime!.toDate(), startOfThisMonth));
-        } else if (historyFilter === 'year') {
-            const startOfThisYear = startOfYear(now);
-            history = history.filter(v => v.checkOutTime!.toDate() && isAfter(v.checkOutTime!.toDate(), startOfThisYear));
-        }
-
-        if (historySearch) {
-            const searchTerm = historySearch.toLowerCase();
-            history = history.filter(v => 
-                v.fullName.toLowerCase().includes(searchTerm) ||
-                v.identificationNumber.toLowerCase().includes(searchTerm) ||
-                (v.divisionEnglishName || '').toLowerCase().includes(searchTerm)
-            );
-        }
-        
-        return history;
-    }, [allVisitors, historyFilter, historySearch]);
-
-    const handleExportPdf = () => {
-        const doc = new jsPDF();
-        doc.text("Visitor History Report", 14, 15);
-
-        (doc as any).autoTable({
-            head: [['Visitor', 'ID', 'Division', 'Time In', 'Time Out', 'Duration', 'Task Status']],
-            body: historyWithDuration.map(v => [
-                v.fullName,
-                `${v.identificationNumber} (${v.identificationType})`,
-                v.divisionEnglishName || 'N/A',
-                v.checkInTime.toDate().toLocaleString(),
-                v.checkOutTime?.toDate().toLocaleString() || 'N/A',
-                v.duration || 'N/A',
-                v.taskStatus || 'N/A'
-            ]),
-            startY: 20
-        });
-
-        logAuditAction(firestore, userProfile.name, 'PDF Exported', 'Exported visitor history PDF report.');
-        doc.save(`visitor_history_${new Date().toISOString().split('T')[0]}.pdf`);
-    };
-
+    const history = useMemo(() => allVisitors.filter(v => v.status === 'OUT').sort((a,b) => b.checkOutTime!.toMillis() - a.checkOutTime!.toMillis()), [allVisitors]);
     return (
-        <Card>
-            <CardHeader>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                    <div>
-                        <CardTitle>Visitor History</CardTitle>
-                        <CardDescription>Complete log of all visitor entries and exits.</CardDescription>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Input 
-                            placeholder="Search Name, ID, Division..." 
-                            value={historySearch} 
-                            onChange={(e) => setHistorySearch(e.target.value)} 
-                            className="w-full sm:w-auto"
-                        />
-                        <Select value={historyFilter} onValueChange={setHistoryFilter}>
-                            <SelectTrigger className="w-full sm:w-[180px]">
-                                <SelectValue placeholder="Filter by date" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="week">This Week</SelectItem>
-                                <SelectItem value="month">This Month</SelectItem>
-                                <SelectItem value="year">This Year</SelectItem>
-                                <SelectItem value="all">All Time</SelectItem>
-                            </SelectContent>
-                        </Select>
-                        <Button onClick={handleExportPdf} disabled={isLoading || historyWithDuration.length === 0}>
-                            <Download className="mr-2 h-4 w-4" /> Export PDF
-                        </Button>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Visitor</TableHead>
-                    <TableHead>Division</TableHead>
-                    <TableHead>Time In</TableHead>
-                    <TableHead>Time Out</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Task Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading ? (
-                    <TableRow><TableCell colSpan={6} className="text-center">Loading data...</TableCell></TableRow>
-                  ) : historyWithDuration.length > 0 ? (
-                    historyWithDuration.map(visitor => (
-                      <TableRow key={visitor.id}>
-                        <TableCell>
-                          <div className="font-medium">{visitor.fullName}</div>
-                          <div className="text-sm text-muted-foreground">{visitor.identificationNumber} ({visitor.identificationType})</div>
-                        </TableCell>
-                        <TableCell>
-                           <Badge style={{ backgroundColor: visitor.divisionBackgroundColorHex, color: visitor.divisionTextColorHex }}>{visitor.divisionEnglishName}</Badge>
-                        </TableCell>
-                        <TableCell>{visitor.checkInTime.toDate().toLocaleString()}</TableCell>
-                        <TableCell>{visitor.checkOutTime?.toDate().toLocaleString()}</TableCell>
-                        <TableCell>{visitor.duration}</TableCell>
-                        <TableCell>
-                          {visitor.taskStatus ? (
-                            <Badge
-                              className={
-                                visitor.taskStatus === 'Completed'
-                                  ? 'bg-green-600 text-white'
-                                  : 'bg-orange-600 text-white'
-                              }
-                            >
-                              {visitor.taskStatus}
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary">N/A</Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow><TableCell colSpan={6} className="text-center">No history records found.</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+        <Card><CardHeader><CardTitle>Visitor History</CardTitle></CardHeader><CardContent>
+            <Table><TableHeader><TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>In</TableHead><TableHead>Out</TableHead><TableHead>Task</TableHead></TableRow></TableHeader>
+            <TableBody>{history.map(v => (
+              <TableRow key={v.id}><TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs">{v.identificationNumber}</div></TableCell><TableCell>{v.divisionEnglishName}</TableCell><TableCell>{v.checkInTime.toDate().toLocaleTimeString()}</TableCell><TableCell>{v.checkOutTime?.toDate().toLocaleTimeString()}</TableCell><TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'}>{v.taskStatus}</Badge></TableCell></TableRow>
+            ))}</TableBody></Table>
+        </CardContent></Card>
     )
 }
-
-const permissionOptions = {
-  Admin: ["Admin Dashboard", "Active Visitors by Division", "Visitor History", "Audit Trail", "Access Management"],
-  "Visitor Management": ["Check-In", "Active", "History"],
-};
-
-const formSchema = z.object({
-  name: z.string().min(2, { message: "Name must be at least 2 characters." }),
-  email: z.string().email({ message: "Please enter a valid email." }),
-  password: z.string().min(6, { message: "Password must be at least 6 characters." }),
-  role: z.enum(["Admin", "Visitor Management"], {
-    required_error: "You need to select a role.",
-  }),
-  permissions: z.array(z.string()).refine((value) => value.length > 0, {
-    message: "You have to select at least one permission.",
-  }),
-});
-
 
 const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => {
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
-
   const usersQuery = useMemoFirebase(() => firestore ? collection(firestore, 'users') : null, [firestore]);
   const { data: users, isLoading: usersLoading } = useCollection<UserProfile>(usersQuery);
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: "",
-      email: "",
-      password: "",
-      role: "Visitor Management",
-      permissions: [],
-    },
+  const form = useForm({
+    resolver: zodResolver(z.object({ name: z.string().min(2), email: z.string().email(), password: z.string().min(6), role: z.enum(["Admin", "Visitor Management"]), permissions: z.array(z.string()).min(1) })),
+    defaultValues: { name: "", email: "", password: "", role: "Visitor Management", permissions: [] as string[] }
   });
 
-  const selectedRole = form.watch('role');
-
-  useEffect(() => {
-    form.setValue('permissions', []);
-  }, [selectedRole, form]);
-
-  async function onSubmit(values: z.infer<typeof formSchema>) {
+  const onSubmit = async (values: any) => {
     if (!firestore) return;
     setIsSubmitting(true);
-    
-    const secondaryAppName = `secondary-auth-app-${new Date().getTime()}`;
-    const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+    const secondaryApp = initializeApp(firebaseConfig, `app-${Date.now()}`);
     const secondaryAuth = getAuth(secondaryApp);
-
     try {
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, values.email, values.password);
-      const newUser = userCredential.user;
-
-      await setDoc(doc(firestore, "users", newUser.uid), {
-        name: values.name,
-        email: values.email,
-        role: values.role,
-        permissions: values.permissions
-      });
-
-      logAuditAction(
-          firestore,
-          userProfile.name,
-          'User Created',
-          `Created new user: ${values.name} (${values.email}) with role: ${values.role}`
-      );
-
-      toast({ title: "User created successfully!" });
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, values.email, values.password);
+      await setDoc(doc(firestore, "users", cred.user.uid), { name: values.name, email: values.email, role: values.role, permissions: values.permissions });
+      logAuditAction(firestore, userProfile.name, 'User Created', `User: ${values.name} (${values.role})`);
+      toast({ title: "User created" });
       form.reset();
-      
-    } catch (error: any) {
-      console.error("Error creating user:", error);
-      let description = "An unknown error occurred.";
-      if (error.code === 'auth/email-already-in-use') {
-        description = "This email is already registered.";
-      }
-      toast({ variant: "destructive", title: "Failed to create user", description });
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
+    } catch (e: any) { toast({ variant: "destructive", title: "Error", description: e.message }); }
+    finally { setIsSubmitting(false); }
+  };
 
+  const permissionOptions = ["Admin Dashboard", "Active Visitors by Division", "Visitor History", "Audit Trail", "Access Management", "Card Management", "Check-In", "Active", "History"];
 
   return (
     <div className="space-y-8">
-      <Card>
-        <CardHeader>
-          <CardTitle>Create New User</CardTitle>
-          <CardDescription>Add a new user and assign them a role and permissions.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Full Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="John Doe" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="role"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Role</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a role" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="Visitor Management">Visitor Management</SelectItem>
-                          <SelectItem value="Admin">Admin</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input type="email" placeholder="user@example.com" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl>
-                        <Input type="password" placeholder="••••••••" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="permissions"
-                render={() => (
-                  <FormItem>
-                    <div className="mb-4">
-                      <FormLabel>Permissions</FormLabel>
-                      <FormDescription>
-                        Select the permissions this user will have.
-                      </FormDescription>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {permissionOptions[selectedRole].map((permission) => (
-                        <FormField
-                          key={permission}
-                          control={form.control}
-                          name="permissions"
-                          render={({ field }) => {
-                            return (
-                              <FormItem className="flex flex-row items-center space-x-3 space-y-0">
-                                <FormControl>
-                                  <Checkbox
-                                    checked={field.value?.includes(permission)}
-                                    onCheckedChange={(checked) => {
-                                      return checked
-                                        ? field.onChange([...(field.value || []), permission])
-                                        : field.onChange(
-                                            field.value?.filter(
-                                              (value) => value !== permission
-                                            )
-                                          );
-                                    }}
-                                  />
-                                </FormControl>
-                                <FormLabel className="font-normal text-sm">
-                                  {permission}
-                                </FormLabel>
-                              </FormItem>
-                            );
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Creating..." : <><UserPlus className="mr-2 h-4 w-4" />Create User</> }
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Existing Users</CardTitle>
-          <CardDescription>A list of all users in the system.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Permissions</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {usersLoading ? (
-                <TableRow><TableCell colSpan={5} className="text-center">Loading users...</TableCell></TableRow>
-              ) : users && users.length > 0 ? (
-                users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      <Badge variant={user.role === 'Admin' ? 'destructive' : 'secondary'}>
-                        {user.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1 max-w-xs">
-                        {user.permissions?.map(p => <Badge key={p} variant="outline" className="font-normal">{p}</Badge>)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" disabled>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="text-destructive" disabled>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow><TableCell colSpan={5} className="text-center">No users found.</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <Card><CardHeader><CardTitle>Create User</CardTitle></CardHeader><CardContent>
+        <Form {...form}><form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <FormField control={form.control} name="name" render={({ field }) => (<FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
+            <FormField control={form.control} name="email" render={({ field }) => (<FormItem><FormLabel>Email</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
+            <FormField control={form.control} name="password" render={({ field }) => (<FormItem><FormLabel>Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl></FormItem>)} />
+            <FormField control={form.control} name="role" render={({ field }) => (<FormItem><FormLabel>Role</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Admin">Admin</SelectItem><SelectItem value="Visitor Management">Staff</SelectItem></SelectContent></Select></FormItem>)} />
+          </div>
+          <FormField control={form.control} name="permissions" render={({ field }) => (
+            <FormItem><FormLabel>Permissions</FormLabel><div className="grid grid-cols-3 gap-2">{permissionOptions.map(p => (
+              <div key={p} className="flex items-center gap-2"><Checkbox checked={field.value.includes(p)} onCheckedChange={(c) => c ? field.onChange([...field.value, p]) : field.onChange(field.value.filter(v => v !== p))}/><span className="text-xs">{p}</span></div>
+            ))}</div></FormItem>
+          )} />
+          <Button type="submit" disabled={isSubmitting}>Create User</Button>
+        </form></Form>
+      </CardContent></Card>
+      <Card><CardHeader><CardTitle>Users</CardTitle></CardHeader><CardContent>
+        <Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Role</TableHead><TableHead>Permissions</TableHead></TableRow></TableHeader>
+        <TableBody>{users?.map(u => (<TableRow key={u.id}><TableCell>{u.name}</TableCell><TableCell><Badge>{u.role}</Badge></TableCell><TableCell className="text-xs opacity-70">{u.permissions?.join(', ')}</TableCell></TableRow>))}</TableBody></Table>
+      </CardContent></Card>
     </div>
   )
 }
 
 const AuditTrailView = () => {
     const { firestore } = useFirebase();
-    const [searchTerm, setSearchTerm] = useState('');
-    const [dateFilter, setDateFilter] = useState('all');
-    
-    const auditLogsQuery = useMemoFirebase(
-        () => (firestore ? query(collection(firestore, 'audit_logs'), orderBy('timestamp', 'desc')) : null),
-        [firestore]
-    );
-    const { data: auditLogs, isLoading } = useCollection<AuditLog>(auditLogsQuery);
-
-    const filteredLogs = useMemo(() => {
-        if (!auditLogs) return [];
-        let filtered = [...auditLogs];
-
-        if (dateFilter !== 'all') {
-            const todayStart = startOfToday();
-            if (dateFilter === 'today') {
-                filtered = filtered.filter(log => log.timestamp && log.timestamp.toDate() >= todayStart);
-            } else if (dateFilter === 'yesterday') {
-                const yesterdayStart = subDays(todayStart, 1);
-                filtered = filtered.filter(log => {
-                    if (!log.timestamp) return false;
-                    const logDate = log.timestamp.toDate();
-                    return logDate >= yesterdayStart && logDate < todayStart;
-                });
-            } else if (dateFilter === '7days') {
-                const sevenDaysAgoStart = subDays(todayStart, 6);
-                filtered = filtered.filter(log => log.timestamp && log.timestamp.toDate() >= sevenDaysAgoStart);
-            }
-        }
-
-        if (searchTerm) {
-            const lowercasedTerm = searchTerm.toLowerCase();
-            filtered = filtered.filter(log =>
-                (log.userName?.toLowerCase().includes(lowercasedTerm)) ||
-                (log.action?.toLowerCase().includes(lowercasedTerm)) ||
-                (log.details?.toLowerCase().includes(lowercasedTerm))
-            );
-        }
-        return filtered;
-    }, [auditLogs, searchTerm, dateFilter]);
-
+    const logsQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'audit_logs'), orderBy('timestamp', 'desc')) : null), [firestore]);
+    const { data: logs, isLoading } = useCollection<AuditLog>(logsQuery);
     return (
-        <Card>
-            <CardHeader>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                    <div>
-                        <CardTitle>Audit Trail</CardTitle>
-                        <CardDescription>Track user actions within the system.</CardDescription>
-                    </div>
-                     <div className="flex flex-wrap items-center gap-2">
-                         <Input
-                            placeholder="Search logs..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full sm:w-auto"
-                        />
-                        <Select value={dateFilter} onValueChange={setDateFilter}>
-                            <SelectTrigger className="w-full sm:w-[180px]">
-                                <SelectValue placeholder="Filter by date" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">All Time</SelectItem>
-                                <SelectItem value="today">Today</SelectItem>
-                                <SelectItem value="yesterday">Yesterday</SelectItem>
-                                <SelectItem value="7days">Last 7 Days</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Date & Time</TableHead>
-                            <TableHead>User</TableHead>
-                            <TableHead>Action</TableHead>
-                            <TableHead>Details</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {isLoading ? (
-                            <TableRow><TableCell colSpan={4} className="text-center">Loading audit trail...</TableCell></TableRow>
-                        ) : filteredLogs && filteredLogs.length > 0 ? (
-                            filteredLogs.map((log) => (
-                                <TableRow key={log.id}>
-                                    <TableCell>{log.timestamp ? log.timestamp.toDate().toLocaleString() : 'No date'}</TableCell>
-                                    <TableCell>{log.userName}</TableCell>
-                                    <TableCell><Badge variant="secondary">{log.action}</Badge></TableCell>
-                                    <TableCell>{log.details}</TableCell>
-                                </TableRow>
-                            ))
-                        ) : (
-                            <TableRow><TableCell colSpan={4} className="text-center">No audit records found for the selected criteria.</TableCell></TableRow>
-                        )}
-                    </TableBody>
-                </Table>
-            </CardContent>
-        </Card>
+        <Card><CardHeader><CardTitle>Audit Trail</CardTitle></CardHeader><CardContent>
+            <Table><TableHeader><TableRow><TableHead>Timestamp</TableHead><TableHead>User</TableHead><TableHead>Action</TableHead><TableHead>Details</TableHead></TableRow></TableHeader>
+            <TableBody>{logs?.map(l => (<TableRow key={l.id}><TableCell className="text-xs">{l.timestamp?.toDate().toLocaleString()}</TableCell><TableCell>{l.userName}</TableCell><TableCell><Badge variant="secondary">{l.action}</Badge></TableCell><TableCell className="text-xs">{l.details}</TableCell></TableRow>))}</TableBody></Table>
+        </CardContent></Card>
     );
 }
