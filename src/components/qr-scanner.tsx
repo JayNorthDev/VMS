@@ -1,8 +1,7 @@
-
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface QRScannerProps {
   onScanSuccess: (decodedText: string) => void;
@@ -11,36 +10,36 @@ interface QRScannerProps {
 }
 
 export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRScannerProps) {
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const regionId = 'qr-reader';
 
   useEffect(() => {
     if (!isActive) return;
 
-    const scanner = new Html5QrcodeScanner(
-      'qr-reader',
-      { 
-        fps: 10, 
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0,
-      },
-      /* verbose= */ false
-    );
+    const html5QrCode = new Html5Qrcode(regionId);
+    scannerRef.current = html5QrCode;
 
-    scanner.render(
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+    html5QrCode.start(
+      { facingMode: 'environment' },
+      config,
       (decodedText) => {
         onScanSuccess(decodedText);
       },
-      (error) => {
-        if (onScanError) onScanError(error);
+      (errorMessage) => {
+        if (onScanError) onScanError(errorMessage);
       }
-    );
-
-    scannerRef.current = scanner;
+    ).catch((err) => {
+      console.error('Failed to start scanner:', err);
+    });
 
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch((error) => {
-          // Ignore clear errors on unmount
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().then(() => {
+          scannerRef.current?.clear();
+        }).catch((err) => {
+          console.error('Failed to stop scanner:', err);
         });
       }
     };
@@ -50,7 +49,7 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
 
   return (
     <div className="w-full max-w-sm mx-auto overflow-hidden rounded-xl border border-muted bg-black/5">
-      <div id="qr-reader" className="w-full" />
+      <div id={regionId} className="w-full" />
     </div>
   );
 }

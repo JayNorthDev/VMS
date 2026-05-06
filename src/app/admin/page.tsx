@@ -68,7 +68,6 @@ const allNavItems: { id: AdminView; label: string; icon: React.ReactNode; permis
 function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
   const router = useRouter();
   const { firestore } = useFirebase();
-  const { isMobile, setOpenMobile } = useSidebar();
   
   const availableNavItems = useMemo(() => {
     if (!userProfile?.permissions) return [];
@@ -95,7 +94,7 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
 
   return (
     <div className="flex min-h-screen bg-gray-100 dark:bg-gray-900">
-      <Sidebar className="flex flex-col bg-blue-950 text-white">
+      <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground">
         <SidebarHeader className="p-6">
           <div className="flex items-center gap-3">
             <Image src="/logo.png" alt="Logo" width={40} height={40} />
@@ -106,25 +105,25 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
           <SidebarMenu>
             {availableNavItems.map(item => (
                  <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton className="hover:bg-blue-900 text-gray-100" isActive={activeView === item.id} onClick={() => setActiveView(item.id)}>
+                    <SidebarMenuButton isActive={activeView === item.id} onClick={() => setActiveView(item.id)}>
                         {item.icon} <span className="ml-2 font-medium">{item.label}</span>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             ))}
             {(userProfile?.permissions?.includes('Card Management') || userProfile?.permissions?.includes('Access Management')) && (
               <SidebarMenuItem>
-                <SidebarMenuButton className="hover:bg-blue-900 text-gray-100" onClick={() => router.push('/admin/cards')}>
+                <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
                   <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )}
           </SidebarMenu>
         </SidebarContent>
-        <SidebarFooter className="p-4 border-t border-white/10">
+        <SidebarFooter className="p-4 border-t border-sidebar-border">
            {userProfile && (
              <>
                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-8 h-8 rounded-full bg-blue-800 flex items-center justify-center font-bold text-sm">
+                  <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-sm">
                     {userProfile?.name?.charAt(0) || "U"}
                   </div>
                   <div className="flex flex-col">
@@ -132,7 +131,7 @@ function AdminLayout({ userProfile }: { userProfile: UserProfile }) {
                     <span className="text-[10px] opacity-60">{userProfile.role}</span>
                   </div>
               </div>
-              <Button variant="ghost" className="w-full justify-start text-white hover:bg-red-950 hover:text-white" onClick={handleSignOut}>
+              <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground" onClick={handleSignOut}>
                   <LogOut className="h-4 w-4 mr-2" /> Sign Out
               </Button>
              </>
@@ -200,7 +199,7 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
         <div className="space-y-6">
             <div className="flex justify-between items-end">
               <div><h1 className="text-3xl font-bold">Admin Dashboard</h1><p className="text-muted-foreground">Comprehensive overview of station traffic and logs.</p></div>
-              <Button size="lg" className="bg-blue-950" onClick={() => setIsVerifying(true)}><Scan className="mr-2 h-5 w-5" /> Verify Card</Button>
+              <Button size="lg" className="bg-primary text-primary-foreground" onClick={() => setIsVerifying(true)}><Scan className="mr-2 h-5 w-5" /> Verify Card</Button>
             </div>
             
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -365,7 +364,7 @@ const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => 
             <FormField control={form.control} name="name" render={({ field }) => (<FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
             <FormField control={form.control} name="email" render={({ field }) => (<FormItem><FormLabel>Email</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
             <FormField control={form.control} name="password" render={({ field }) => (<FormItem><FormLabel>Password</FormLabel><FormControl><Input type="password" {...field} /></FormControl></FormItem>)} />
-            <FormField control={form.control} name="role" render={({ field }) => (<FormItem><FormLabel>Role</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Admin">Admin</SelectItem><SelectItem value="Visitor Management">Staff</SelectItem></SelectContent></Select></FormItem>)} />
+            <FormField control={form.control} name="role" render={({ field }) => (<FormItem><FormLabel>Role</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="Admin">Admin</SelectItem><SelectItem value="Visitor Management">Visitor Management (Staff)</SelectItem></SelectContent></Select></FormItem>)} />
           </div>
           <FormField control={form.control} name="permissions" render={({ field }) => (
             <FormItem><FormLabel>Permissions</FormLabel><div className="grid grid-cols-3 gap-2">{permissionOptions.map(p => (

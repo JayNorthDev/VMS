@@ -87,7 +87,7 @@ import {
   WithId,
   signOutUser,
 } from '@/firebase';
-import { collection, Timestamp, doc, query, where, getDocs, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, Timestamp, doc, query, where, getDocs, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { startOfWeek, startOfMonth, isAfter } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
@@ -292,6 +292,10 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
     const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
     
     try {
+      // Generate the new visitor ID client-side to link documents without waiting
+      const newVisitorRef = doc(collection(firestore, 'visitorEntries'));
+      const visitorId = newVisitorRef.id;
+
       const newEntry = {
         ...tempVisitorData,
         checkInTime: Timestamp.now(),
@@ -302,12 +306,13 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
         divisionTextColorHex: division.text,
       };
 
-      const res = await addDocumentNonBlocking(collection(firestore, 'visitorEntries'), newEntry);
+      // Perform updates sequentially
+      await setDoc(newVisitorRef, newEntry);
       
       if (tempVisitorData.allocatedCardId) {
         await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.allocatedCardId), {
           status: 'allocated',
-          currentVisitorId: res?.id || 'pending'
+          currentVisitorId: visitorId
         });
       }
 
@@ -327,8 +332,8 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
       
       toast({ title: 'Success', description: 'Visitor checked in successfully.' });
     } catch (error: any) {
-      console.error('Check-in error:', error);
-      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong.' });
+      console.error('Check-in error details:', error);
+      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong during data sync.' });
     }
   };
 
@@ -363,7 +368,7 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
                   </Select>
                 </FormItem>
               )} />
-              <Button type="submit" className="w-full bg-blue-950 hover:bg-blue-900">Review & Check In</Button>
+              <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90">Review & Check In</Button>
             </form>
           </Form>
         </CardContent>
@@ -410,7 +415,7 @@ const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData }: any) => 
         </div>
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20">Edit</Button>
-          <Button onClick={onConfirm} className="bg-white text-blue-900 font-bold">Confirm & Save</Button>
+          <Button onClick={onConfirm} className="bg-white text-primary font-bold">Confirm & Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -470,7 +475,7 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
                   <TableCell><Badge variant="outline">{v.allocatedCardId || 'None'}</Badge></TableCell>
                   <TableCell>{v.checkInTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
                   <TableCell className="text-right space-x-2">
-                    <Button size="sm" className="bg-blue-950" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Done</Button>
+                    <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Done</Button>
                     <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Incomplete')}><X className="h-4 w-4 mr-1"/> Pending</Button>
                   </TableCell>
                 </TableRow>

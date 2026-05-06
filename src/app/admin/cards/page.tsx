@@ -139,7 +139,7 @@ export default function CardGenerationPage() {
         pdf.setFontSize(24);
         pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 28, { align: "center" });
 
-        // Division Name (English Only - Sinhala removed)
+        // Division Name (English)
         pdf.setFontSize(6);
         pdf.text(division.en, pageWidth / 2, 38, { align: "center" });
 
