@@ -12,14 +12,11 @@ import {
   Clock,
   Users,
   Check,
-  Info,
   X,
   Search,
   BookUser,
-  User,
-  CreditCard,
-  QrCode,
   Scan,
+  QrCode,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,7 +25,6 @@ import {
   CardTitle,
   CardContent,
   CardDescription,
-  CardFooter,
 } from '@/components/ui/card';
 import {
   Form,
@@ -56,16 +52,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
   Table,
   TableHeader,
   TableRow,
@@ -76,19 +62,16 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData } from '@/lib/divisions';
-import type { Division, VisitorEntry, UserProfile, IDCard } from '@/lib/types';
+import type { VisitorEntry, UserProfile, IDCard } from '@/lib/types';
 import { logAuditAction } from '@/lib/audit';
 import {
   useFirebase,
   useCollection,
-  addDocumentNonBlocking,
-  updateDocumentNonBlocking,
   useMemoFirebase,
   WithId,
   signOutUser,
 } from '@/firebase';
-import { collection, Timestamp, doc, query, where, getDocs, updateDoc, getDoc, setDoc } from 'firebase/firestore';
-import { startOfWeek, startOfMonth, isAfter } from 'date-fns';
+import { collection, Timestamp, doc, query, where, getDocs, updateDoc, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
 import { decryptQRData } from '@/lib/qr-security';
@@ -180,7 +163,7 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'in': return <CheckInView getActiveCount={(id) => activeVisitors.filter(v => v.divisionId === id).length} allVisitors={allVisitors || []} userProfile={userProfile} />;
+      case 'in': return <CheckInView getActiveCount={(id) => activeVisitors.filter(v => v.divisionId === id).length} userProfile={userProfile} />;
       case 'out': return <ActiveVisitorsView visitors={filteredActiveVisitors} isLoading={visitorsLoading} searchValue={activeSearch} onSearchChange={setActiveSearch} userProfile={userProfile} />;
       case 'history': return <HistoryView visitors={allVisitors?.filter(v => v.status === 'OUT') || []} isLoading={visitorsLoading} searchValue={historySearch} onSearchChange={setHistorySearch} filter={historyFilter} onFilterChange={setHistoryFilter} />;
       default: return null;
@@ -241,7 +224,7 @@ const Navbar = ({ activeTab, setActiveTab, userProfile }: { activeTab: Tab; setA
   );
 };
 
-const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCount: (id: string) => number; allVisitors: WithId<VisitorEntry>[]; userProfile: UserProfile }) => {
+const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: string) => number; userProfile: UserProfile }) => {
   const [selectedDivisionId, setSelectedDivisionId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
@@ -292,7 +275,6 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
     const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
     
     try {
-      // Generate the new visitor ID client-side to link documents without waiting
       const newVisitorRef = doc(collection(firestore, 'visitorEntries'));
       const visitorId = newVisitorRef.id;
 
@@ -306,7 +288,6 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
         divisionTextColorHex: division.text,
       };
 
-      // Perform updates sequentially
       await setDoc(newVisitorRef, newEntry);
       
       if (tempVisitorData.allocatedCardId) {
@@ -318,22 +299,13 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
 
       logAuditAction(firestore, userProfile.name, 'Visitor Check-In', `Visitor: ${newEntry.fullName}, Card: ${newEntry.allocatedCardId || 'None'}`);
       
-      // Full cleanup and reset
       setIsModalOpen(false);
-      form.reset({
-        identificationType: '',
-        identificationNumber: '',
-        fullName: '',
-        gender: '',
-        address: '',
-        allocatedCardId: ''
-      });
+      form.reset({ identificationType: '', identificationNumber: '', fullName: '', gender: '', address: '', allocatedCardId: '' });
       setSelectedDivisionId(null);
-      
       toast({ title: 'Success', description: 'Visitor checked in successfully.' });
     } catch (error: any) {
       console.error('Check-in error details:', error);
-      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong during data sync.' });
+      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong.' });
     }
   };
 
@@ -392,7 +364,7 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
         <Dialog open={isScanning} onOpenChange={setIsScanning}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>Scan ID Card</DialogTitle><DialogDescription>Hold the visitor card QR code up to your camera.</DialogDescription></DialogHeader>
-            <QRScanner onScanSuccess={handleQRScan} onScanError={(e) => console.log(e)} />
+            <QRScanner onScanSuccess={handleQRScan} />
             <DialogFooter><Button variant="secondary" onClick={() => setIsScanning(false)}>Cancel</Button></DialogFooter>
           </DialogContent>
         </Dialog>
@@ -496,7 +468,7 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
   );
 };
 
-const HistoryView = ({ visitors, isLoading, searchValue, onSearchChange, filter, onFilterChange }: any) => (
+const HistoryView = ({ visitors, isLoading, searchValue, onSearchChange }: any) => (
   <Card>
     <CardHeader className="flex flex-row items-center justify-between">
       <div><CardTitle>Visitor History</CardTitle><CardDescription>Past check-ins and logs.</CardDescription></div>
