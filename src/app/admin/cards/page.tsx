@@ -116,7 +116,7 @@ export default function CardGenerationPage() {
           createdAt: Timestamp.now()
         };
 
-        // Save to Firestore (Non-overwriting check usually handled by unique ID, but we use cardId as ID)
+        // Save to Firestore
         await setDoc(doc(cardsCol, cardIdStr), cardData);
 
         // Add to PDF
@@ -139,7 +139,7 @@ export default function CardGenerationPage() {
         pdf.setFontSize(24);
         pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 28, { align: "center" });
 
-        // Division Name (English Only)
+        // Division Name (English Only - Sinhala removed)
         pdf.setFontSize(6);
         pdf.text(division.en, pageWidth / 2, 38, { align: "center" });
 

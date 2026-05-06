@@ -290,27 +290,46 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
   const confirmCheckIn = async () => {
     if (!firestore || !tempVisitorData) return;
     const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
-    const newEntry = {
-      ...tempVisitorData,
-      checkInTime: Timestamp.now(),
-      status: 'IN',
-      divisionEnglishName: division.en,
-      divisionSinhalaName: division.si,
-      divisionBackgroundColorHex: division.color,
-      divisionTextColorHex: division.text,
-    };
-    const res = await addDocumentNonBlocking(collection(firestore, 'visitorEntries'), newEntry);
-    if (tempVisitorData.allocatedCardId) {
-      await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.allocatedCardId), {
-        status: 'allocated',
-        currentVisitorId: res?.id || 'pending'
+    
+    try {
+      const newEntry = {
+        ...tempVisitorData,
+        checkInTime: Timestamp.now(),
+        status: 'IN',
+        divisionEnglishName: division.en,
+        divisionSinhalaName: division.si,
+        divisionBackgroundColorHex: division.color,
+        divisionTextColorHex: division.text,
+      };
+
+      const res = await addDocumentNonBlocking(collection(firestore, 'visitorEntries'), newEntry);
+      
+      if (tempVisitorData.allocatedCardId) {
+        await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.allocatedCardId), {
+          status: 'allocated',
+          currentVisitorId: res?.id || 'pending'
+        });
+      }
+
+      logAuditAction(firestore, userProfile.name, 'Visitor Check-In', `Visitor: ${newEntry.fullName}, Card: ${newEntry.allocatedCardId || 'None'}`);
+      
+      // Full cleanup and reset
+      setIsModalOpen(false);
+      form.reset({
+        identificationType: '',
+        identificationNumber: '',
+        fullName: '',
+        gender: '',
+        address: '',
+        allocatedCardId: ''
       });
+      setSelectedDivisionId(null);
+      
+      toast({ title: 'Success', description: 'Visitor checked in successfully.' });
+    } catch (error: any) {
+      console.error('Check-in error:', error);
+      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong.' });
     }
-    logAuditAction(firestore, userProfile.name, 'Visitor Check-In', `Visitor: ${newEntry.fullName}, Card: ${newEntry.allocatedCardId || 'None'}`);
-    setIsModalOpen(false);
-    form.reset();
-    setSelectedDivisionId(null);
-    toast({ title: 'Success', description: 'Visitor checked in successfully.' });
   };
 
   return (
@@ -331,6 +350,9 @@ const CheckInView = ({ getActiveCount, allVisitors, userProfile }: { getActiveCo
               )} />
               <FormField control={form.control} name="gender" render={({ field }) => (
                 <FormItem><FormLabel>Gender</FormLabel><Select onValueChange={field.onChange} value={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger></FormControl><SelectContent><SelectItem value="Male">Male</SelectItem><SelectItem value="Female">Female</SelectItem><SelectItem value="Other">Other</SelectItem></SelectContent></Select></FormItem>
+              )} />
+              <FormField control={form.control} name="address" render={({ field }) => (
+                <FormItem><FormLabel>Address</FormLabel><FormControl><Textarea {...field} /></FormControl><FormMessage /></FormItem>
               )} />
               <FormField control={form.control} name="allocatedCardId" render={({ field }) => (
                 <FormItem>

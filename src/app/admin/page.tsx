@@ -317,11 +317,23 @@ const AccessManagementView = ({ userProfile }: { userProfile: UserProfile }) => 
 
   const selectedRole = form.watch("role");
 
+  // Strict permission options based on role
   const permissionOptions = useMemo(() => {
     if (selectedRole === "Admin") {
-      return ["Admin Dashboard", "Active Visitors by Division", "Visitor History", "Audit Trail", "Access Management", "Card Management"];
+      return [
+        "Admin Dashboard",
+        "Active Visitors by Division",
+        "Visitor History",
+        "Audit Trail",
+        "Access Management",
+        "Card Management"
+      ];
     } else {
-      return ["Check-In", "Active", "History"];
+      return [
+        "Check-In",
+        "Active",
+        "History"
+      ];
     }
   }, [selectedRole]);
 
