@@ -25,7 +25,7 @@ import { generateQRPayload } from '@/lib/qr-security';
 import { logAuditAction } from '@/lib/audit';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import jsPDF from 'jspdf';
+import jsPDF from 'jsPDF';
 import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
@@ -204,13 +204,16 @@ export default function CardManagementPage() {
         return;
       }
 
+      let index = 0;
       for (const cardDoc of querySnapshot.docs) {
         const data = cardDoc.data();
         const cardId = data.cardId;
         const qrData = data.qrCodeData;
         const imageName = `${cardId}.png`;
 
-        csvContent += `${cardId},qr_images/${imageName}\n`;
+        // Using sequential index for Card_Number as requested
+        csvContent += `${index + 1},qr_images/${imageName}\n`;
+        
         const qrDataUrl = await QRCode.toDataURL(qrData, { 
           margin: 1, 
           width: 1024,
@@ -218,6 +221,8 @@ export default function CardManagementPage() {
         });
         const base64Data = qrDataUrl.split(',')[1];
         qrFolder?.file(imageName, base64Data, { base64: true });
+        
+        index++;
       }
 
       zip.file("data.csv", csvContent);
