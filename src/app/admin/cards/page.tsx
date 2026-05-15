@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -8,8 +9,10 @@ import {
   ArrowLeft,
   Building,
   Hash,
-  Eye,
-  ShieldCheck
+  ShieldCheck,
+  FileArchive,
+  AlertCircle,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -25,17 +28,25 @@ import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
+import JSZip from 'jszip';
 
-export default function CardGenerationPage() {
+export default function CardManagementPage() {
   const { userData, loading: authLoading } = useAuth();
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const router = useRouter();
 
+  // Generation Section State
   const [selectedDivisionId, setSelectedDivisionId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1);
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastSequence, setLastSequence] = useState<number>(0);
+
+  // Export Section State
+  const [exportDivisionId, setExportDivisionId] = useState<string>('');
+  const [existingCount, setExistingCount] = useState<number | null>(null);
+  const [isCheckingExport, setIsCheckingExport] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Check permissions
   useEffect(() => {
@@ -53,10 +64,13 @@ export default function CardGenerationPage() {
     }
   }, [userData, authLoading, router]);
 
-  // Fetch last sequence number for the selected division
+  // Fetch last sequence number for the generation section
   useEffect(() => {
     async function fetchLastNum() {
-      if (!firestore || !selectedDivisionId) return;
+      if (!firestore || !selectedDivisionId) {
+        setLastSequence(0);
+        return;
+      }
       
       const cardsCol = collection(firestore, 'generated_id_cards');
       const q = query(
@@ -82,6 +96,29 @@ export default function CardGenerationPage() {
     fetchLastNum();
   }, [firestore, selectedDivisionId]);
 
+  // Check existing cards for the export section
+  useEffect(() => {
+    async function checkExisting() {
+      if (!firestore || !exportDivisionId) {
+        setExistingCount(null);
+        return;
+      }
+      setIsCheckingExport(true);
+      try {
+        const cardsCol = collection(firestore, 'generated_id_cards');
+        const q = query(cardsCol, where('divisionId', '==', exportDivisionId));
+        const querySnapshot = await getDocs(q);
+        setExistingCount(querySnapshot.size);
+      } catch (error) {
+        console.error('Error checking existing cards:', error);
+        setExistingCount(0);
+      } finally {
+        setIsCheckingExport(false);
+      }
+    }
+    checkExisting();
+  }, [firestore, exportDivisionId]);
+
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
   if (!userData) return null;
 
@@ -96,7 +133,7 @@ export default function CardGenerationPage() {
     const cardsCol = collection(firestore, 'generated_id_cards');
     
     try {
-      const pdf = new jsPDF('p', 'mm', [85.6, 54]); // Credit card size in mm
+      const pdf = new jsPDF('p', 'mm', [85.6, 54]);
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
 
@@ -116,50 +153,29 @@ export default function CardGenerationPage() {
           createdAt: Timestamp.now()
         };
 
-        // Save to Firestore
         await setDoc(doc(cardsCol, cardIdStr), cardData);
 
-        // Add to PDF
         if (i > 1) pdf.addPage();
-        
-        // Background color
         pdf.setFillColor(division.color);
         pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-
-        // Header
         pdf.setTextColor(division.text === '#FFFFFF' ? 255 : 0);
         pdf.setFontSize(8);
         pdf.setFont("helvetica", "bold");
-        pdf.text("VISITOR ID CARD", pageWidth / 2, 8, { align: "center" });
-        
-        pdf.setFontSize(5);
-        pdf.text("POLICE STATION BADULLA", pageWidth / 2, 12, { align: "center" });
-
-        // Card ID Number
+        pdf.text("VISITOR ID CARD", pageWidth / 2, 10, { align: "center" });
         pdf.setFontSize(24);
-        pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 28, { align: "center" });
-
-        // Division Name (English)
+        pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 35, { align: "center" });
         pdf.setFontSize(6);
-        pdf.text(division.en, pageWidth / 2, 38, { align: "center" });
-
-        // QR Code
+        pdf.text(division.en, pageWidth / 2, 45, { align: "center" });
         const qrUrl = await QRCode.toDataURL(qrData, { margin: 1 });
-        pdf.addImage(qrUrl, 'PNG', (pageWidth / 2) - 15, 48, 30, 30);
-
-        // Footer Card Ref
+        pdf.addImage(qrUrl, 'PNG', (pageWidth / 2) - 15, 50, 30, 30);
         pdf.setFontSize(4);
-        pdf.text(`Card ID: ${cardIdStr}`, pageWidth / 2, 82, { align: "center" });
+        pdf.text(`ID: ${cardIdStr}`, pageWidth / 2, 82, { align: "center" });
       }
 
       logAuditAction(firestore, userData.name, 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
-      
       pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
-      toast({ title: 'Success', description: `${quantity} cards generated starting from ${lastSequence + 1}.` });
-      
-      // Refresh sequence
+      toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
       setLastSequence(lastSequence + quantity);
-      
     } catch (error: any) {
       console.error(error);
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
@@ -168,132 +184,260 @@ export default function CardGenerationPage() {
     }
   };
 
+  const handleExportZip = async () => {
+    if (!firestore || !exportDivisionId) return;
+
+    setIsExporting(true);
+    const division = divisionData.find(d => d.id === exportDivisionId)!;
+    
+    try {
+      const zip = new JSZip();
+      const qrFolder = zip.folder("qr_images");
+      let csvContent = "Card_Number,@QR_Image\n";
+
+      const cardsCol = collection(firestore, 'generated_id_cards');
+      const q = query(cardsCol, where('divisionId', '==', exportDivisionId));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        toast({ variant: 'destructive', title: 'Error', description: 'No cards found for export.' });
+        return;
+      }
+
+      for (const cardDoc of querySnapshot.docs) {
+        const data = cardDoc.data();
+        const cardId = data.cardId;
+        const qrData = data.qrCodeData;
+        const imageName = `${cardId}.png`;
+
+        csvContent += `${cardId},qr_images/${imageName}\n`;
+        const qrDataUrl = await QRCode.toDataURL(qrData, { 
+          margin: 1, 
+          width: 1024,
+          errorCorrectionLevel: 'H' 
+        });
+        const base64Data = qrDataUrl.split(',')[1];
+        qrFolder?.file(imageName, base64Data, { base64: true });
+      }
+
+      zip.file("data.csv", csvContent);
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = window.URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${division.en.replace(/\s+/g, '_')}_Print_Export.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({ title: 'Export Complete', description: `ZIP file generated for ${querySnapshot.size} cards.` });
+    } catch (error: any) {
+      console.error(error);
+      toast({ variant: 'destructive', title: 'Export Failed', description: error.message });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const selectedDivision = divisionData.find(d => d.id === selectedDivisionId);
 
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4">
+    <div className="max-w-6xl mx-auto py-8 px-4">
       <Button variant="ghost" className="mb-6" onClick={() => router.back()}>
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
       </Button>
 
-      <div className="flex items-center gap-3 mb-8">
-        <ShieldCheck className="h-8 w-8 text-primary" />
+      <div className="flex items-center gap-3 mb-10">
+        <ShieldCheck className="h-10 w-10 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold">Card Management</h1>
-          <p className="text-muted-foreground">Securely generate and manage visitor identification cards.</p>
+          <h1 className="text-3xl font-bold">ID Card Management</h1>
+          <p className="text-muted-foreground">Configure, generate, and export secure visitor identification cards.</p>
         </div>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="h-6 w-6 text-primary" />
-              Batch Configuration
-            </CardTitle>
-            <CardDescription>
-              New cards will continue the sequence from <strong>{lastSequence + 1}</strong>.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Building className="h-4 w-4" /> Select Division
-              </label>
-              <Select value={selectedDivisionId} onValueChange={setSelectedDivisionId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a division..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {divisionData.map(div => (
-                    <SelectItem key={div.id} value={div.id}>{div.en}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+      <div className="grid gap-8 lg:grid-cols-3">
+        {/* Section A: Batch Generation */}
+        <div className="lg:col-span-2 space-y-8">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Hash className="h-6 w-6 text-primary" />
+                Section A: Batch Generation
+              </CardTitle>
+              <CardDescription>
+                Create NEW ID card records in the database and download a printable PDF.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <Building className="h-4 w-4" /> Select Division
+                  </label>
+                  <Select value={selectedDivisionId} onValueChange={setSelectedDivisionId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a division..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {divisionData.map(div => (
+                        <SelectItem key={div.id} value={div.id}>{div.en}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Current highest sequence: {lastSequence}</p>
+                </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Hash className="h-4 w-4" /> Quantity to Generate
-              </label>
-              <Input 
-                type="number" 
-                min={1} 
-                max={50} 
-                value={quantity} 
-                onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-              />
-              <p className="text-xs text-muted-foreground">Highest current: {lastSequence}</p>
-            </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <CreditCard className="h-4 w-4" /> Quantity
+                  </label>
+                  <Input 
+                    type="number" 
+                    min={1} 
+                    max={50} 
+                    value={quantity} 
+                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                  />
+                  <p className="text-xs text-muted-foreground">Cards will start from {lastSequence + 1}</p>
+                </div>
+              </div>
 
-            <div className="flex flex-col gap-3 pt-4">
               <Button 
-                className="w-full" 
-                size="lg" 
+                className="w-full h-12 text-lg" 
                 onClick={handleGenerateCards} 
                 disabled={isGenerating || !selectedDivisionId}
               >
-                {isGenerating ? (
-                  "Processing Batch..."
-                ) : (
+                {isGenerating ? "Processing..." : (
                   <>
                     <Download className="mr-2 h-5 w-5" /> Generate & Download PDF
                   </>
                 )}
               </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card className="ring-2 ring-primary transition-all">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              Visual Preview
-            </CardTitle>
-            <CardDescription>
-              {selectedDivisionId ? `Mockup for ${selectedDivision?.en}` : "Select a division to see card design."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center p-6">
-            {selectedDivision ? (
-              <div 
-                className="w-full max-w-[260px] aspect-[54/85.6] rounded-xl shadow-2xl flex flex-col items-center p-6 text-center border border-white/20"
-                style={{ 
-                  backgroundColor: selectedDivision.color,
-                  color: selectedDivision.text
-                }}
+          {/* Section B: Export Printing Data */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileSpreadsheet className="h-6 w-6 text-primary" />
+                Section B: Export Printing Data
+              </CardTitle>
+              <CardDescription>
+                Export existing card records for external printing (ZIP with CSV and QR Images).
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <Building className="h-4 w-4" /> Select Division for Export
+                </label>
+                <Select value={exportDivisionId} onValueChange={setExportDivisionId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose a division..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {divisionData.map(div => (
+                      <SelectItem key={div.id} value={div.id}>{div.en}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {exportDivisionId && !isCheckingExport && (
+                <div className={`p-4 rounded-lg flex items-start gap-3 border ${existingCount && existingCount > 0 ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-orange-50 border-orange-100 text-orange-800'}`}>
+                  {existingCount && existingCount > 0 ? (
+                    <>
+                      <FileArchive className="h-5 w-5 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-sm">Found {existingCount} existing cards.</p>
+                        <p className="text-xs opacity-80">Ready to export for high-quality printing.</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle className="h-5 w-5 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-sm">No cards found.</p>
+                        <p className="text-xs opacity-80">Please use the generation section above to create cards for this division first.</p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <Button 
+                variant="secondary"
+                className="w-full h-12 text-lg border-2 border-primary/10" 
+                onClick={handleExportZip} 
+                disabled={isExporting || !existingCount || existingCount === 0}
               >
-                <div className="flex flex-col items-center mb-4">
-                  <Image src="/logo.png" alt="Logo" width={32} height={32} className="mb-1" />
-                  <h3 className="font-bold text-xs uppercase tracking-tighter">Visitor ID Card</h3>
-                  <p className="text-[8px] opacity-80 uppercase leading-none">Police Station Badulla</p>
-                </div>
-                
-                <div className="text-7xl font-black my-4 tabular-nums">
-                  {(lastSequence + 1).toString().padStart(2, '0')}
-                </div>
-                
-                <div className="mt-auto w-full">
-                  <p className="text-[10px] font-bold leading-tight">{selectedDivision.en}</p>
-                  
-                  <div className="mt-4 bg-white p-2 rounded-lg inline-block shadow-inner">
-                    <div className="w-20 h-20 bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">
-                      <CreditCard className="text-gray-400 h-8 w-8" />
-                    </div>
+                {isExporting ? "Compressing ZIP..." : (
+                  <>
+                    <FileArchive className="mr-2 h-5 w-5" /> Generate & Download ZIP
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Visual Preview Sidebar */}
+        <div className="space-y-6">
+          <Card className="ring-2 ring-primary">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg">Visual Preview</CardTitle>
+              <CardDescription>Mockup of the card layout.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center">
+              {selectedDivision ? (
+                <div 
+                  className="w-full max-w-[240px] aspect-[54/85.6] rounded-xl shadow-2xl flex flex-col items-center p-6 text-center border border-white/20 transition-all duration-300"
+                  style={{ 
+                    backgroundColor: selectedDivision.color,
+                    color: selectedDivision.text
+                  }}
+                >
+                  <div className="flex flex-col items-center mb-4">
+                    <Image src="/logo.png" alt="Logo" width={32} height={32} className="mb-1" />
+                    <h3 className="font-bold text-[10px] uppercase tracking-tighter">Visitor ID Card</h3>
                   </div>
                   
-                  <p className="text-[7px] mt-4 opacity-70">
-                    ID: {selectedDivision.en.split(' ').map(w => w[0]).join('').toUpperCase()}-{(lastSequence + 1).toString().padStart(3, '0')}
-                  </p>
+                  <div className="text-7xl font-black my-4 tabular-nums">
+                    {(lastSequence + 1).toString().padStart(2, '0')}
+                  </div>
+                  
+                  <div className="mt-auto w-full">
+                    <p className="text-[10px] font-bold leading-tight">{selectedDivision.en}</p>
+                    <div className="mt-4 bg-white p-2 rounded-lg inline-block shadow-inner">
+                      <div className="w-20 h-20 bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">
+                        <CreditCard className="text-gray-400 h-8 w-8" />
+                      </div>
+                    </div>
+                    <p className="text-[7px] mt-4 opacity-70">
+                      ID: {selectedDivision.en.split(' ').map(w => w[0]).join('').toUpperCase()}-{(lastSequence + 1).toString().padStart(3, '0')}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="w-full max-w-[260px] aspect-[54/85.6] border-2 border-dashed rounded-xl flex items-center justify-center text-muted-foreground p-8 text-center text-sm">
-                Live card preview will appear here once a division is selected.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              ) : (
+                <div className="w-full max-w-[240px] aspect-[54/85.6] border-2 border-dashed rounded-xl flex items-center justify-center text-muted-foreground p-8 text-center text-sm bg-muted/30">
+                  Select a division to see card design.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          
+          <div className="bg-muted/50 rounded-lg p-4 border text-xs text-muted-foreground space-y-2">
+            <p className="font-semibold text-primary">Printing Notes:</p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>PDF format is optimized for direct A4/Letter printers.</li>
+              <li>ZIP format is recommended for BarTender, Zebra, or Epson dedicated label printers.</li>
+              <li>QR codes in ZIP are high-resolution (1024x1024) for optimal scanning.</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );
