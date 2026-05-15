@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -25,7 +24,7 @@ import { generateQRPayload } from '@/lib/qr-security';
 import { logAuditAction } from '@/lib/audit';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import jsPDF from 'jsPDF';
+import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
