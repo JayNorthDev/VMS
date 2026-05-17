@@ -50,18 +50,19 @@ export default function CardManagementPage() {
   const [isCheckingExport, setIsCheckingExport] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Check permissions
+  // Fixed Route Guard: Explicitly allow super admin
   useEffect(() => {
     if (!authLoading) {
       const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+      const isAdminRole = userData?.role === 'Admin';
+      const hasAccess = isSuperAdmin || (isAdminRole && userData?.permissions?.includes('Card Management'));
       
-      if (!isSuperAdmin && (!userData || userData.role !== 'Admin')) {
+      if (!isSuperAdmin && !isAdminRole) {
         router.replace('/');
         return;
       }
       
-      const hasPermission = isSuperAdmin || userData?.permissions?.includes('Card Management');
-      if (!hasPermission) {
+      if (!hasAccess) {
         router.replace('/admin');
       }
     }
@@ -139,7 +140,10 @@ export default function CardManagementPage() {
   }, [firestore, exportDivisionId]);
 
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
-  if (!userData && user?.email !== SUPER_ADMIN_EMAIL) return null;
+  
+  // Super admin bypass check
+  const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+  if (!isSuperAdmin && (!userData || userData.role !== 'Admin')) return null;
 
   const handleGenerateCards = async () => {
     if (!firestore || !selectedDivisionId || quantity < 1) {
