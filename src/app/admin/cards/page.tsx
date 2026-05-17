@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -31,8 +30,10 @@ import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
 
+const SUPER_ADMIN_EMAIL = 'policevms@admin.com';
+
 export default function CardManagementPage() {
-  const { userData, loading: authLoading } = useAuth();
+  const { user, userData, loading: authLoading } = useAuth();
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const router = useRouter();
@@ -52,18 +53,19 @@ export default function CardManagementPage() {
   // Check permissions
   useEffect(() => {
     if (!authLoading) {
-      if (!userData || userData.role !== 'Admin') {
+      const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+      
+      if (!isSuperAdmin && (!userData || userData.role !== 'Admin')) {
         router.replace('/');
         return;
       }
-      const hasPermission = userData.permissions?.some(p => 
-        p === 'Card Management'
-      );
+      
+      const hasPermission = isSuperAdmin || userData?.permissions?.includes('Card Management');
       if (!hasPermission) {
         router.replace('/admin');
       }
     }
-  }, [userData, authLoading, router]);
+  }, [userData, user, authLoading, router]);
 
   // Fetch last sequence number for the generation section
   const fetchLastNum = useCallback(async (divisionId: string) => {
@@ -137,7 +139,7 @@ export default function CardManagementPage() {
   }, [firestore, exportDivisionId]);
 
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
-  if (!userData) return null;
+  if (!userData && user?.email !== SUPER_ADMIN_EMAIL) return null;
 
   const handleGenerateCards = async () => {
     if (!firestore || !selectedDivisionId || quantity < 1) {
@@ -188,7 +190,7 @@ export default function CardManagementPage() {
         pdf.text(`ID: ${cardIdStr}`, pageWidth / 2, 82, { align: "center" });
       }
 
-      logAuditAction(firestore, userData.name, 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
+      logAuditAction(firestore, userData?.name || 'Super Admin', 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
       pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
       toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
       

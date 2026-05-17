@@ -1,57 +1,34 @@
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
     function isSignedIn() {
       return request.auth != null;
     }
-
-    function isUserAdmin(userId) {
-      return get(/databases/$(database)/documents/users/$(userId)).data.role == 'Admin';
+    function isAdmin() {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
-    match /divisions/{divisionId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /visitorEntries/{visitorEntryId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && resource != null;
-      allow delete: if false;
-    }
-
+    // Core Collections
     match /users/{userId} {
-      allow get: if isSignedIn() && (isUserAdmin(request.auth.uid) || request.auth.uid == userId);
-      allow list: if isSignedIn() && isUserAdmin(request.auth.uid);
-      allow create: if isSignedIn() && isUserAdmin(request.auth.uid);
-      allow update, delete: if isSignedIn() && isUserAdmin(request.auth.uid);
+      allow read, write: if isSignedIn();
     }
-    
-    match /audit_logs/{auditLogId} {
-      allow get: if isSignedIn() && isUserAdmin(request.auth.uid);
-      allow list: if isSignedIn() && isUserAdmin(request.auth.uid);
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+    match /visitorEntries/{docId} {
+      allow read, write: if isSignedIn();
     }
-
-    // New sub-collection structure for ID cards
-    match /generated_id_cards/{prefix}/cards/{cardId} {
+    match /divisions/{divId} {
       allow read: if isSignedIn();
-      allow create, delete: if isSignedIn() && isUserAdmin(request.auth.uid);
-      allow update: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /audit_logs/{logId} {
+      allow read, write: if isSignedIn();
     }
 
-    // Collection group rule for cards
+    // Important: Allow Collection Group queries for generated ID cards
     match /{path=**}/cards/{cardId} {
       allow read: if isSignedIn();
+    }
+    match /generated_id_cards/{prefix}/cards/{cardId} {
+      allow read, write: if isSignedIn();
     }
   }
 }

@@ -1,4 +1,3 @@
-
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -195,7 +194,7 @@ const ActiveByDivisionView = () => {
 
   return (
     <div className="space-y-6">
-      <div><h2 className="text-2xl font-bold">Active Visitors By Division</h2><p className="text-muted-foreground">Real-time occupancy across all station departments.</p></div>
+      <div><h2 className="text-2xl font-bold">Active By Division</h2><p className="text-muted-foreground">Real-time occupancy across all station departments.</p></div>
       
       {error && (
         <Card className="border-destructive bg-destructive/5">
@@ -420,7 +419,7 @@ type AdminView = 'dashboard' | 'active_visitors' | 'history' | 'access_managemen
 
 const allNavItems: { id: AdminView; label: string; icon: React.ReactNode; permission: string }[] = [
     { id: 'dashboard', label: 'Overview', icon: <LayoutDashboard className="h-4 w-4" />, permission: 'Admin Dashboard' },
-    { id: 'active_visitors', label: 'Occupancy', icon: <Activity className="h-4 w-4" />, permission: 'Active Visitors by Division' },
+    { id: 'active_visitors', label: 'Active By Division', icon: <Activity className="h-4 w-4" />, permission: 'Active Visitors by Division' },
     { id: 'history', label: 'Traffic Logs', icon: <Clock className="h-4 w-4" />, permission: 'Visitor History' },
     { id: 'access_management', label: 'Access Control', icon: <UserCog className="h-4 w-4" />, permission: 'Access Management' },
     { id: 'audit_trail', label: 'Security Logs', icon: <ScrollText className="h-4 w-4" />, permission: 'Audit Trail' }
