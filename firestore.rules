@@ -4,29 +4,39 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
+    
     function isAdmin() {
-      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
     }
 
     // Core Collections
     match /users/{userId} {
       allow read, write: if isSignedIn();
     }
+    
     match /visitorEntries/{docId} {
       allow read, write: if isSignedIn();
     }
+    
     match /divisions/{divId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
+    
     match /audit_logs/{logId} {
       allow read, write: if isSignedIn();
     }
 
     // Important: Allow Collection Group queries for generated ID cards
+    // This allows query(collectionGroup(db, 'cards')) to work
     match /{path=**}/cards/{cardId} {
       allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
+
+    // Specific path for administrative card management
     match /generated_id_cards/{prefix}/cards/{cardId} {
       allow read, write: if isSignedIn();
     }
