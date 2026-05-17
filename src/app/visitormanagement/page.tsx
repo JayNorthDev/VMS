@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -59,7 +60,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@/badge';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData, getPrefix } from '@/lib/divisions';
 import type { VisitorEntry, UserProfile, IDCard } from '@/lib/types';
@@ -92,19 +93,7 @@ const checkInSchema = z
     if (identificationType === 'NIC') {
       const nicRegex = /(^\d{9}[VX]$)|(^\d{12}$)/;
       if (!nicRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid NIC format. Expected 9 digits + V/X or 12 digits.', path: ['identificationNumber'] });
-      }
-    }
-    if (identificationType === 'Driving License') {
-      const dlRegex = /^B\d{7}$/;
-      if (!dlRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid DL format. Expected B + 7 digits.', path: ['identificationNumber'] });
-      }
-    }
-    if (identificationType === 'Passport') {
-      const passportRegex = /^[A-Z]{1,2}\d{7,9}$/;
-      if (!passportRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Passport format. Expected 1-2 letters + 7-9 digits.', path: ['identificationNumber'] });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid NIC format.', path: ['identificationNumber'] });
       }
     }
   });
@@ -131,8 +120,6 @@ export default function VisitorManagementPage() {
 function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) {
   const [activeTab, setActiveTab] = useState<Tab>('in');
   const [activeSearch, setActiveSearch] = useState('');
-  const [historySearch, setHistorySearch] = useState('');
-  const [historyFilter, setHistoryFilter] = useState('week');
   const { firestore } = useFirebase();
 
   const visitorEntriesQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'visitorEntries') : null), [firestore]);
@@ -158,14 +145,18 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
   const filteredActiveVisitors = useMemo(() => {
     if (!activeSearch) return activeVisitors;
     const term = activeSearch.toLowerCase();
-    return activeVisitors.filter(v => v.fullName.toLowerCase().includes(term) || v.identificationNumber.toLowerCase().includes(term) || (v.allocatedCardId || '').toLowerCase().includes(term));
+    return activeVisitors.filter(v => 
+      v.fullName.toLowerCase().includes(term) || 
+      v.identificationNumber.toLowerCase().includes(term) || 
+      (v.allocatedCardId || '').toLowerCase().includes(term)
+    );
   }, [activeVisitors, activeSearch]);
 
   const renderContent = () => {
     switch (activeTab) {
       case 'in': return <CheckInView getActiveCount={(id) => activeVisitors.filter(v => v.divisionId === id).length} userProfile={userProfile} />;
       case 'out': return <ActiveVisitorsView visitors={filteredActiveVisitors} isLoading={visitorsLoading} searchValue={activeSearch} onSearchChange={setActiveSearch} userProfile={userProfile} />;
-      case 'history': return <HistoryView visitors={allVisitors?.filter(v => v.status === 'OUT') || []} isLoading={visitorsLoading} searchValue={historySearch} onSearchChange={setHistorySearch} filter={historyFilter} onFilterChange={setHistoryFilter} />;
+      case 'history': return <HistoryView visitors={allVisitors?.filter(v => v.status === 'OUT') || []} isLoading={visitorsLoading} />;
       default: return null;
     }
   };
@@ -183,14 +174,14 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
 const Navbar = ({ activeTab, setActiveTab, userProfile }: { activeTab: Tab; setActiveTab: (tab: Tab) => void; userProfile: UserProfile }) => {
   const router = useRouter();
   const allNavItems = [
-    { id: 'in', label: 'Check-In', icon: <LogIn />, permission: 'Check-In' },
-    { id: 'out', label: 'Active', icon: <Users />, permission: 'Active' },
-    { id: 'history', label: 'History', icon: <Clock />, permission: 'History' },
+    { id: 'in', label: 'Check-In', icon: <LogIn className="h-4 w-4" />, permission: 'Check-In' },
+    { id: 'out', label: 'Active', icon: <Users className="h-4 w-4" />, permission: 'Active' },
+    { id: 'history', label: 'History', icon: <Clock className="h-4 w-4" />, permission: 'History' },
   ];
   const availableNavItems = allNavItems.filter(item => userProfile.permissions?.includes(item.permission));
 
   return (
-    <nav className="bg-sidebar text-sidebar-foreground shadow-lg z-10">
+    <nav className="bg-sidebar text-sidebar-foreground shadow-lg z-10 border-b">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           <div className="flex items-center gap-3">
@@ -205,7 +196,7 @@ const Navbar = ({ activeTab, setActiveTab, userProfile }: { activeTab: Tab; setA
             ))}
             {userProfile.role === 'Admin' && (
               <Button variant="ghost" onClick={() => router.push('/admin')}>
-                <BookUser /> <span className="ml-2">Admin Panel</span>
+                <BookUser className="h-4 w-4 mr-2" /> Admin Panel
               </Button>
             )}
           </div>
@@ -236,34 +227,42 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   useEffect(() => {
     async function fetchCards() {
       if (!firestore || !selectedDivisionId) { setAvailableCards([]); return; }
-      const division = divisionData.find(d => d.id === selectedDivisionId);
-      if (!division) return;
-      const prefix = getPrefix(division.en);
-      
-      const q = query(
-        collection(firestore, 'generated_id_cards', prefix, 'cards'), 
-        where('status', '==', 'available')
-      );
-      const snapshot = await getDocs(q);
-      setAvailableCards(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard)));
+      try {
+        const division = divisionData.find(d => d.id === selectedDivisionId);
+        if (!division) return;
+        const prefix = getPrefix(division.en);
+        
+        const q = query(
+          collection(firestore, 'generated_id_cards', prefix, 'cards'), 
+          where('status', '==', 'available')
+        );
+        const snapshot = await getDocs(q);
+        setAvailableCards(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard)));
+      } catch (error) {
+        console.error('Error fetching available cards:', error);
+      }
     }
     fetchCards();
   }, [firestore, selectedDivisionId]);
 
   const handleQRScan = (decodedText: string) => {
-    const decrypted = decryptQRData(decodedText);
-    if (!decrypted.includes('verify-police-vms')) {
-      toast({ variant: 'destructive', title: 'Invalid Card', description: 'This QR code is not recognized by our system.' });
-      return;
+    try {
+      const decrypted = decryptQRData(decodedText);
+      if (!decrypted.includes('verify-police-vms')) {
+        toast({ variant: 'destructive', title: 'Invalid Card', description: 'This QR code is not recognized.' });
+        return;
+      }
+      const [cardId, divisionId] = decrypted.split('|');
+      if (divisionId !== selectedDivisionId) {
+        toast({ variant: 'destructive', title: 'Wrong Division', description: 'Card mismatch.' });
+        return;
+      }
+      form.setValue('allocatedCardId', cardId);
+      setIsScanning(false);
+      toast({ title: 'Card Linked', description: `Card No: ${cardId} selected.` });
+    } catch (e) {
+      console.error('QR Scan error:', e);
     }
-    const [cardId, divisionId] = decrypted.split('|');
-    if (divisionId !== selectedDivisionId) {
-      toast({ variant: 'destructive', title: 'Wrong Division', description: `This card belongs to ${divisionData.find(d => d.id === divisionId)?.en}.` });
-      return;
-    }
-    form.setValue('allocatedCardId', cardId);
-    setIsScanning(false);
-    toast({ title: 'Card Linked', description: `Card No: ${cardId} has been selected.` });
   };
 
   const form = useForm<CheckInFormValues>({
@@ -272,17 +271,17 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   });
 
   const onSubmit = (values: CheckInFormValues) => {
-    if (!selectedDivisionId) { toast({ variant: 'destructive', title: 'Required', description: 'Select a division first.' }); return; }
+    if (!selectedDivisionId) { toast({ variant: 'destructive', title: 'Required', description: 'Select a division.' }); return; }
     setTempVisitorData({ ...values, divisionId: selectedDivisionId });
     setIsModalOpen(true);
   };
 
   const confirmCheckIn = async () => {
     if (!firestore || !tempVisitorData) return;
-    const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
-    const prefix = getPrefix(division.en);
-    
     try {
+      const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
+      const prefix = getPrefix(division.en);
+      
       const newVisitorRef = doc(collection(firestore, 'visitorEntries'));
       const visitorId = newVisitorRef.id;
 
@@ -308,12 +307,12 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       logAuditAction(firestore, userProfile.name, 'Visitor Check-In', `Visitor: ${newEntry.fullName}, Card: ${newEntry.allocatedCardId || 'None'}`);
       
       setIsModalOpen(false);
-      form.reset({ identificationType: '', identificationNumber: '', fullName: '', gender: '', address: '', allocatedCardId: '' });
+      form.reset();
       setSelectedDivisionId(null);
       toast({ title: 'Success', description: 'Visitor checked in successfully.' });
     } catch (error: any) {
-      console.error('Check-in error details:', error);
-      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message || 'Something went wrong.' });
+      console.error('Check-in error:', error);
+      toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message });
     }
   };
 
@@ -348,7 +347,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
                   </Select>
                 </FormItem>
               )} />
-              <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90">Review & Check In</Button>
+              <Button type="submit" className="w-full">Review & Check In</Button>
             </form>
           </Form>
         </CardContent>
@@ -371,7 +370,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       {isScanning && (
         <Dialog open={isScanning} onOpenChange={setIsScanning}>
           <DialogContent className="sm:max-w-md">
-            <DialogHeader><DialogTitle>Scan ID Card</DialogTitle><DialogDescription>Hold the visitor card QR code up to your camera.</DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle>Scan ID Card</DialogTitle><DialogDescription>Hold card QR up to camera.</DialogDescription></DialogHeader>
             <QRScanner onScanSuccess={handleQRScan} />
             <DialogFooter><Button variant="secondary" onClick={() => setIsScanning(false)}>Cancel</Button></DialogFooter>
           </DialogContent>
@@ -387,14 +386,14 @@ const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData }: any) => 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent style={{ backgroundColor: division.color, color: division.text }} className="text-white max-w-md">
-        <DialogHeader><DialogTitle>Confirm Entry</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle className="text-white">Confirm Entry</DialogTitle></DialogHeader>
         <div className="space-y-4 py-4">
           <div className="bg-black/10 p-3 rounded-lg"><div className="text-xs opacity-70">Division</div><div className="font-bold">{division.en}</div></div>
           <div className="bg-black/10 p-3 rounded-lg"><div className="text-xs opacity-70">Visitor</div><div className="font-bold">{visitorData.fullName}</div></div>
           <div className="bg-black/10 p-3 rounded-lg"><div className="text-xs opacity-70">Card No</div><div className="font-bold">{visitorData.allocatedCardId || 'None'}</div></div>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20">Edit</Button>
+          <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20 text-white">Edit</Button>
           <Button onClick={onConfirm} className="bg-white text-primary font-bold">Confirm & Save</Button>
         </DialogFooter>
       </DialogContent>
@@ -408,41 +407,50 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
   const [isScanning, setIsScanning] = useState(false);
 
   const handleQRScan = (decodedText: string) => {
-    const decrypted = decryptQRData(decodedText);
-    if (!decrypted.includes('verify-police-vms')) return;
-    const [cardId] = decrypted.split('|');
-    const visitor = visitors.find((v: any) => v.allocatedCardId === cardId);
-    if (!visitor) {
-      toast({ variant: 'destructive', title: 'Not Found', description: `No active visitor found for card ${cardId}.` });
-      return;
+    try {
+      const decrypted = decryptQRData(decodedText);
+      if (!decrypted.includes('verify-police-vms')) return;
+      const [cardId] = decrypted.split('|');
+      const visitor = visitors.find((v: any) => v.allocatedCardId === cardId);
+      if (!visitor) {
+        toast({ variant: 'destructive', title: 'Not Found', description: `No active visitor for card ${cardId}.` });
+        return;
+      }
+      setIsScanning(false);
+      onSearchChange(cardId);
+      toast({ title: 'Card Identified', description: `Visitor: ${visitor.fullName}` });
+    } catch (e) {
+      console.error('Scan error:', e);
     }
-    setIsScanning(false);
-    onSearchChange(cardId);
-    toast({ title: 'Card Identified', description: `Visitor: ${visitor.fullName}` });
   };
 
   const handleCheckOut = async (v: WithId<VisitorEntry>, taskStatus: 'Completed' | 'Incomplete') => {
     if (!firestore) return;
-    const division = divisionData.find(d => d.id === v.divisionId);
-    const prefix = division ? getPrefix(division.en) : v.divisionId;
+    try {
+      const division = divisionData.find(d => d.id === v.divisionId);
+      const prefix = division ? getPrefix(division.en) : v.allocatedCardId?.split('-')[0] || v.divisionId;
 
-    await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), taskStatus });
-    if (v.allocatedCardId) {
-      await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
+      await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), taskStatus });
+      if (v.allocatedCardId) {
+        await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
+      }
+      logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Status: ${taskStatus}`);
+      toast({ title: 'Visitor Checked Out' });
+    } catch (error) {
+      console.error('Check-out error:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to process check-out.' });
     }
-    logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Status: ${taskStatus}`);
-    toast({ title: 'Visitor Checked Out' });
   };
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <div><CardTitle>Active Visitors</CardTitle><CardDescription>Currently inside the station.</CardDescription></div>
+        <div><CardTitle>Active Visitors</CardTitle><CardDescription>Currently inside station.</CardDescription></div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setIsScanning(true)}><Scan className="h-4 w-4 mr-2"/> Scan to Identify</Button>
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search name or card..." value={searchValue} onChange={(e) => onSearchChange(e.target.value)} className="pl-8" />
+            <Input placeholder="Search records..." value={searchValue} onChange={(e) => onSearchChange(e.target.value)} className="pl-8" />
           </div>
         </div>
       </CardHeader>
@@ -453,12 +461,12 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
             {isLoading ? <TableRow><TableCell colSpan={5} className="text-center">Loading...</TableCell></TableRow> : 
               visitors.map((v: any) => (
                 <TableRow key={v.id}>
-                  <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs text-muted-foreground">{v.identificationNumber}</div></TableCell>
+                  <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs opacity-60">{v.identificationNumber}</div></TableCell>
                   <TableCell><Badge style={{ backgroundColor: v.divisionBackgroundColorHex, color: v.divisionTextColorHex }}>{v.divisionEnglishName}</Badge></TableCell>
                   <TableCell><Badge variant="outline">{v.allocatedCardId || 'None'}</Badge></TableCell>
-                  <TableCell>{v.checkInTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
+                  <TableCell className="text-xs">{v.checkInTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
                   <TableCell className="text-right space-x-2">
-                    <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Done</Button>
+                    <Button size="sm" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Done</Button>
                     <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Incomplete')}><X className="h-4 w-4 mr-1"/> Pending</Button>
                   </TableCell>
                 </TableRow>
@@ -469,9 +477,8 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
       </CardContent>
       {isScanning && (
         <Dialog open={isScanning} onOpenChange={setIsScanning}>
-          <DialogContent><DialogHeader><DialogTitle>Identify Visitor</DialogTitle><DialogDescription>Scan the visitor's card to find their record.</DialogDescription></DialogHeader>
+          <DialogContent><DialogHeader><DialogTitle>Identify Visitor</DialogTitle></DialogHeader>
             <QRScanner onScanSuccess={handleQRScan} />
-            <DialogFooter><Button variant="ghost" onClick={() => setIsScanning(false)}>Close</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}
@@ -479,28 +486,24 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
   );
 };
 
-const HistoryView = ({ visitors, isLoading, searchValue, onSearchChange }: any) => (
+const HistoryView = ({ visitors, isLoading }: any) => (
   <Card>
-    <CardHeader className="flex flex-row items-center justify-between">
-      <div><CardTitle>Visitor History</CardTitle><CardDescription>Past check-ins and logs.</CardDescription></div>
-      <div className="relative"><Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Search records..." value={searchValue} onChange={(e) => onSearchChange(e.target.value)} className="pl-8" />
-      </div>
-    </CardHeader>
+    <CardHeader><CardTitle>Visitor History</CardTitle></CardHeader>
     <CardContent>
       <Table>
-        <TableHeader><TableRow><TableHead>Visitor</TableHead><TableHead>Gender</TableHead><TableHead>Division</TableHead><TableHead>Time In</TableHead><TableHead>Time Out</TableHead><TableHead>Task</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>Time In</TableHead><TableHead>Time Out</TableHead><TableHead>Task</TableHead></TableRow></TableHeader>
         <TableBody>
-          {visitors.map((v: any) => (
-            <TableRow key={v.id}>
-              <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs text-muted-foreground">{v.identificationNumber}</div></TableCell>
-              <TableCell>{v.gender}</TableCell>
-              <TableCell>{v.divisionEnglishName}</TableCell>
-              <TableCell>{v.checkInTime.toDate().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</TableCell>
-              <TableCell>{v.checkOutTime?.toDate().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</TableCell>
-              <TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'}>{v.taskStatus}</Badge></TableCell>
-            </TableRow>
-          ))}
+          {isLoading ? <TableRow><TableCell colSpan={5} className="text-center py-8">Loading...</TableCell></TableRow> : 
+            visitors.map((v: any) => (
+              <TableRow key={v.id}>
+                <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs opacity-60">{v.identificationNumber}</div></TableCell>
+                <TableCell>{v.divisionEnglishName}</TableCell>
+                <TableCell className="text-xs">{v.checkInTime.toDate().toLocaleString()}</TableCell>
+                <TableCell className="text-xs">{v.checkOutTime?.toDate().toLocaleString()}</TableCell>
+                <TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'}>{v.taskStatus}</Badge></TableCell>
+              </TableRow>
+            ))
+          }
         </TableBody>
       </Table>
     </CardContent>

@@ -42,10 +42,16 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    match /generated_id_cards/{divisionId}/cards/{cardId} {
-      allow get, list: if isSignedIn();
+    // New sub-collection structure for ID cards
+    match /generated_id_cards/{prefix}/cards/{cardId} {
+      allow read: if isSignedIn();
       allow create, delete: if isSignedIn() && isUserAdmin(request.auth.uid);
       allow update: if isSignedIn();
+    }
+
+    // Collection group rule for cards
+    match /{path=**}/cards/{cardId} {
+      allow read: if isSignedIn();
     }
   }
 }

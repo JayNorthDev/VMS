@@ -1,3 +1,4 @@
+
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,23 +16,39 @@ import {
   BadgeAlert,
   CreditCard,
   Scan,
+  Plus,
+  Trash2,
+  Shield,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useCollection, useMemoFirebase, signOutUser, useFirebase } from '@/firebase';
-import { collection, doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, deleteDoc, query, orderBy, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData, getPrefix } from '@/lib/divisions';
-import type { VisitorEntry, UserProfile, IDCard } from '@/lib/types';
+import type { VisitorEntry, UserProfile, IDCard, AuditLog } from '@/lib/types';
 import { Sidebar, SidebarContent, SidebarMenuItem, SidebarMenu, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
-import { startOfToday } from 'date-fns';
+import { startOfToday, format } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
 import { decryptQRData } from '@/lib/qr-security';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
-// Placeholder sub-components for illustrative purposes (assuming implementation elsewhere or standard views)
+const STAFF_PERMISSIONS = ['Check-In', 'Active', 'History'];
+const ADMIN_PERMISSIONS = [
+  'Admin Dashboard', 
+  'Active Visitors by Division', 
+  'Visitor History', 
+  'Audit Trail', 
+  'Access Management', 
+  'Card Management'
+];
+
 const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[], isLoading: boolean }) => {
     const { firestore } = useFirebase();
     const [isVerifying, setIsVerifying] = useState(false);
@@ -39,40 +56,45 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
     const { toast } = useToast();
 
     const handleVerifyScan = async (decodedText: string) => {
-      const decrypted = decryptQRData(decodedText);
-      if (!decrypted.includes('verify-police-vms')) {
-        toast({ variant: 'destructive', title: 'Security Alert', description: 'This card was not issued by Badulla Police Station.' });
-        return;
-      }
-      const [cardId, divisionId] = decrypted.split('|');
-      setIsVerifying(false);
-      
-      if (!firestore) return;
-
-      const division = divisionData.find(d => d.id === divisionId);
-      const prefix = division ? getPrefix(division.en) : divisionId;
-      
-      const cardSnap = await getDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', cardId));
-      if (cardSnap.exists()) {
-        const cardData = cardSnap.data() as IDCard;
-        let visitorData = null;
-        if (cardData.status === 'allocated') {
-          const activeVisitor = allVisitors.find(v => v.status === 'IN' && v.allocatedCardId === cardId);
-          visitorData = activeVisitor || null;
+      try {
+        const decrypted = decryptQRData(decodedText);
+        if (!decrypted.includes('verify-police-vms')) {
+          toast({ variant: 'destructive', title: 'Security Alert', description: 'This card was not issued by Badulla Police Station.' });
+          return;
         }
-        setScannedCard({ card: cardData, visitor: visitorData });
-      } else {
-        toast({ variant: 'destructive', title: 'Not Found', description: 'This card ID does not exist in our database.' });
+        const [cardId, divisionId] = decrypted.split('|');
+        setIsVerifying(false);
+        
+        if (!firestore) return;
+
+        const division = divisionData.find(d => d.id === divisionId);
+        const prefix = division ? getPrefix(division.en) : cardId.split('-')[0];
+        
+        const cardSnap = await getDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', cardId));
+        if (cardSnap.exists()) {
+          const cardData = cardSnap.data() as IDCard;
+          let visitorData = null;
+          if (cardData.status === 'allocated') {
+            const activeVisitor = allVisitors.find(v => v.status === 'IN' && v.allocatedCardId === cardId);
+            visitorData = activeVisitor || null;
+          }
+          setScannedCard({ card: cardData, visitor: visitorData });
+        } else {
+          toast({ variant: 'destructive', title: 'Not Found', description: 'This card ID does not exist in our database.' });
+        }
+      } catch (error) {
+        console.error('Error verifying card:', error);
+        toast({ variant: 'destructive', title: 'Error', description: 'Failed to verify card details.' });
       }
     };
 
     const stats = useMemo(() => {
         const todayStart = startOfToday();
         return {
-            today: allVisitors.filter(v => v.checkInTime.toDate() >= todayStart).length,
+            today: allVisitors.filter(v => v.checkInTime && v.checkInTime.toDate() >= todayStart).length,
             active: allVisitors.filter(v => v.status === 'IN').length,
             completed: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.taskStatus === 'Completed').length,
-            pending: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.taskStatus === 'Incomplete').length,
+            pending: allVisitors.filter(v => v.status === 'IN').length,
         }
     }, [allVisitors]);
 
@@ -133,14 +155,222 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
     )
 }
 
+const AccessManagementView = () => {
+  const { firestore } = useFirebase();
+  const { toast } = useToast();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  
+  // Form State
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<'Admin' | 'Visitor Management'>('Visitor Management');
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
+
+  const usersQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'users') : null), [firestore]);
+  const { data: users, isLoading } = useCollection<UserProfile>(usersQuery);
+
+  const availablePermissions = role === 'Admin' ? ADMIN_PERMISSIONS : STAFF_PERMISSIONS;
+
+  // Clear invalid permissions when role changes
+  useEffect(() => {
+    setSelectedPermissions([]);
+  }, [role]);
+
+  const handleSaveUser = async () => {
+    if (!firestore) return;
+    if (!name || !email) {
+      toast({ variant: 'destructive', title: 'Error', description: 'Name and Email are required.' });
+      return;
+    }
+
+    try {
+      const userRef = doc(firestore, 'users', editingUser?.id || email.replace(/[@.]/g, '_'));
+      const userData = {
+        name,
+        email,
+        role,
+        permissions: selectedPermissions,
+      };
+      await setDoc(userRef, userData, { merge: true });
+      toast({ title: 'Success', description: `User ${editingUser ? 'updated' : 'created'} successfully.` });
+      setIsModalOpen(false);
+      resetForm();
+    } catch (error) {
+      console.error('Error saving user:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to save user profile.' });
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!firestore || !window.confirm('Are you sure you want to delete this user?')) return;
+    try {
+      await deleteDoc(doc(firestore, 'users', userId));
+      toast({ title: 'Success', description: 'User deleted.' });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to delete user.' });
+    }
+  };
+
+  const resetForm = () => {
+    setName('');
+    setEmail('');
+    setRole('Visitor Management');
+    setSelectedPermissions([]);
+    setEditingUser(null);
+  };
+
+  const openEdit = (user: UserProfile) => {
+    setEditingUser(user);
+    setName(user.name);
+    setEmail(user.email);
+    setRole(user.role);
+    setSelectedPermissions(user.permissions || []);
+    setIsModalOpen(true);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div><h2 className="text-2xl font-bold">Access Management</h2><p className="text-muted-foreground">Manage system users and their specialized permissions.</p></div>
+        <Button onClick={() => { resetForm(); setIsModalOpen(true); }}><Plus className="mr-2 h-4 w-4" /> Add New User</Button>
+      </div>
+
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Permissions</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? <TableRow><TableCell colSpan={5} className="text-center py-8">Loading users...</TableCell></TableRow> : 
+              users?.map(u => (
+                <TableRow key={u.id}>
+                  <TableCell className="font-medium">{u.name}</TableCell>
+                  <TableCell>{u.email}</TableCell>
+                  <TableCell><Badge variant={u.role === 'Admin' ? 'default' : 'secondary'}>{u.role}</Badge></TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {u.permissions?.map(p => <Badge key={p} variant="outline" className="text-[10px]">{p}</Badge>)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => openEdit(u)}><UserCog className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDeleteUser(u.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            }
+          </TableBody>
+        </Table>
+      </Card>
+
+      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{editingUser ? 'Edit User' : 'Create User'}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2"><label className="text-sm font-bold">Full Name</label><Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Sgt. Silva" /></div>
+            <div className="space-y-2"><label className="text-sm font-bold">Email</label><Input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" disabled={!!editingUser} /></div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold">System Role</label>
+              <Select value={role} onValueChange={(val: any) => setRole(val)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="Admin">Admin</SelectItem><SelectItem value="Visitor Management">Visitor Management (Staff)</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold flex items-center gap-2"><Shield className="h-4 w-4" /> Permissions for {role}</label>
+              <div className="grid grid-cols-1 gap-2 border p-3 rounded-md bg-muted/30">
+                {availablePermissions.map(p => (
+                  <div key={p} className="flex items-center space-x-2">
+                    <Checkbox id={p} checked={selectedPermissions.includes(p)} onCheckedChange={(checked) => {
+                      if (checked) setSelectedPermissions([...selectedPermissions, p]);
+                      else setSelectedPermissions(selectedPermissions.filter(item => item !== p));
+                    }} />
+                    <label htmlFor={p} className="text-sm">{p}</label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter><Button onClick={handleSaveUser}>{editingUser ? 'Update User' : 'Create User'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+const AuditTrailView = () => {
+  const { firestore } = useFirebase();
+  const auditQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'audit_logs'), orderBy('timestamp', 'desc')) : null), [firestore]);
+  const { data: logs, isLoading } = useCollection<AuditLog>(auditQuery);
+
+  return (
+    <div className="space-y-6">
+      <div><h2 className="text-2xl font-bold">Audit Trail</h2><p className="text-muted-foreground">Review chronological system activity and logs.</p></div>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow><TableHead>Timestamp</TableHead><TableHead>User</TableHead><TableHead>Action</TableHead><TableHead>Details</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? <TableRow><TableCell colSpan={4} className="text-center py-8">Loading logs...</TableCell></TableRow> : 
+              logs?.map(log => (
+                <TableRow key={log.id}>
+                  <TableCell className="text-xs">{log.timestamp ? format(log.timestamp.toDate(), 'yyyy-MM-dd HH:mm:ss') : '...'}</TableCell>
+                  <TableCell className="font-medium">{log.userName}</TableCell>
+                  <TableCell><Badge variant="outline">{log.action}</Badge></TableCell>
+                  <TableCell className="text-sm opacity-80">{log.details}</TableCell>
+                </TableRow>
+              ))
+            }
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
+  );
+};
+
+const VisitorHistoryView = ({ visitors, isLoading }: any) => (
+  <div className="space-y-6">
+    <div><h2 className="text-2xl font-bold">Visitor History</h2><p className="text-muted-foreground">Historical records of all station visits.</p></div>
+    <Card>
+      <Table>
+        <TableHeader>
+          <TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>Time In</TableHead><TableHead>Time Out</TableHead><TableHead>Status</TableHead></TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading ? <TableRow><TableCell colSpan={5} className="text-center py-8">Loading history...</TableCell></TableRow> : 
+            visitors.filter((v: any) => v.status === 'OUT').map((v: any) => (
+              <TableRow key={v.id}>
+                <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs opacity-60">{v.identificationNumber}</div></TableCell>
+                <TableCell>{v.divisionEnglishName}</TableCell>
+                <TableCell className="text-xs">{format(v.checkInTime.toDate(), 'MM/dd HH:mm')}</TableCell>
+                <TableCell className="text-xs">{v.checkOutTime ? format(v.checkOutTime.toDate(), 'MM/dd HH:mm') : '-'}</TableCell>
+                <TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'}>{v.taskStatus}</Badge></TableCell>
+              </TableRow>
+            ))
+          }
+        </TableBody>
+      </Table>
+    </Card>
+  </div>
+);
+
 type AdminView = 'dashboard' | 'active_visitors' | 'history' | 'access_management' | 'audit_trail';
 
 const allNavItems: { id: AdminView; label: string; icon: React.ReactNode; permission: string }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard />, permission: 'Admin Dashboard' },
-    { id: 'active_visitors', label: 'Active By Division', icon: <Building />, permission: 'Active Visitors by Division' },
-    { id: 'history', label: 'Visitor History', icon: <Clock />, permission: 'Visitor History' },
-    { id: 'access_management', label: 'Access Management', icon: <UserCog />, permission: 'Access Management' },
-    { id: 'audit_trail', label: 'Audit Trail', icon: <ScrollText />, permission: 'Audit Trail' }
+    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, permission: 'Admin Dashboard' },
+    { id: 'active_visitors', label: 'Active By Division', icon: <Building className="h-4 w-4" />, permission: 'Active Visitors by Division' },
+    { id: 'history', label: 'Visitor History', icon: <Clock className="h-4 w-4" />, permission: 'Visitor History' },
+    { id: 'access_management', label: 'Access Management', icon: <UserCog className="h-4 w-4" />, permission: 'Access Management' },
+    { id: 'audit_trail', label: 'Audit Trail', icon: <ScrollText className="h-4 w-4" />, permission: 'Audit Trail' }
 ];
 
 export default function AdminPage() {
@@ -153,7 +383,13 @@ export default function AdminPage() {
     return allNavItems.filter(item => userData.permissions.includes(item.permission));
   }, [userData?.permissions]);
   
-  const [activeView, setActiveView] = useState<AdminView>(availableNavItems[0]?.id || 'dashboard');
+  const [activeView, setActiveView] = useState<AdminView>('dashboard');
+
+  useEffect(() => {
+    if (availableNavItems.length > 0 && !availableNavItems.some(i => i.id === activeView)) {
+      setActiveView(availableNavItems[0].id);
+    }
+  }, [availableNavItems, activeView]);
 
   const visitorEntriesQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'visitorEntries') : null), [firestore]);
   const { data: allVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
@@ -172,14 +408,17 @@ export default function AdminPage() {
   const renderContent = () => {
     switch (activeView) {
       case 'dashboard': return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
-      default: return <div className="p-8">View "{activeView}" is under construction.</div>;
+      case 'access_management': return <AccessManagementView />;
+      case 'audit_trail': return <AuditTrailView />;
+      case 'history': return <VisitorHistoryView visitors={allVisitors || []} isLoading={visitorsLoading} />;
+      default: return <div className="p-8">View "{activeView}" content.</div>;
     }
   }
 
   return (
     <SidebarProvider>
       <div className="flex min-h-screen w-full bg-gray-100 dark:bg-gray-900">
-        <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground">
+        <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground border-r">
           <SidebarHeader className="p-6">
             <div className="flex items-center gap-3">
               <Image src="/logo.png" alt="Logo" width={40} height={40} />
@@ -195,25 +434,27 @@ export default function AdminPage() {
                       </SidebarMenuButton>
                   </SidebarMenuItem>
               ))}
-              {(userData?.permissions?.includes('Card Management') || userData?.permissions?.includes('Access Management')) && (
+              {(userData?.permissions?.includes('Card Management')) && (
                 <SidebarMenuItem>
                   <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
-                    <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
+                    <CreditCard className="h-4 w-4" /> <span className="ml-2 font-medium">Card Management</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter className="p-4 border-t border-sidebar-border">
-            <div className="flex items-center gap-3 mb-4">
-                <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-sm">
-                  {userData?.name?.charAt(0) || "U"}
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-sm font-semibold">{userData.name}</span>
-                  <span className="text-[10px] opacity-60">{userData.role}</span>
-                </div>
-            </div>
+            {userData && (
+              <div className="flex items-center gap-3 mb-4">
+                  <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-sm">
+                    {userData?.name?.charAt(0) || "U"}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-semibold">{userData.name}</span>
+                    <span className="text-[10px] opacity-60">{userData.role}</span>
+                  </div>
+              </div>
+            )}
             <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground" onClick={handleSignOut}>
                 <LogOut className="h-4 w-4 mr-2" /> Sign Out
             </Button>

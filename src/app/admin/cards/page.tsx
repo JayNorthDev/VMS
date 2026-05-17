@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -56,7 +57,7 @@ export default function CardManagementPage() {
         return;
       }
       const hasPermission = userData.permissions?.some(p => 
-        p === 'Access Management' || p === 'Card Management'
+        p === 'Card Management'
       );
       if (!hasPermission) {
         router.replace('/admin');
@@ -165,7 +166,6 @@ export default function CardManagementPage() {
           qrCodeData: qrData,
           status: 'available',
           currentVisitorId: null,
-          currentLogId: null,
           createdAt: Timestamp.now()
         };
 
@@ -192,11 +192,10 @@ export default function CardManagementPage() {
       pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
       toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
       
-      // Reset state and refresh counter
       setQuantity(1);
       fetchLastNum(selectedDivisionId);
     } catch (error: any) {
-      console.error(error);
+      console.error('Error generating cards:', error);
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
     } finally {
       setIsGenerating(false);
@@ -257,7 +256,7 @@ export default function CardManagementPage() {
 
       toast({ title: 'Export Complete', description: `ZIP file generated for ${querySnapshot.size} cards.` });
     } catch (error: any) {
-      console.error(error);
+      console.error('Error exporting ZIP:', error);
       toast({ variant: 'destructive', title: 'Export Failed', description: error.message });
     } finally {
       setIsExporting(false);
@@ -282,7 +281,6 @@ export default function CardManagementPage() {
         </div>
 
         <div className="grid gap-8 lg:grid-cols-3">
-          {/* Section A: Batch Generation */}
           <div className="lg:col-span-2 space-y-8">
             <Card>
               <CardHeader>
@@ -342,7 +340,6 @@ export default function CardManagementPage() {
               </CardContent>
             </Card>
 
-            {/* Section B: Export Printing Data */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -408,7 +405,6 @@ export default function CardManagementPage() {
             </Card>
           </div>
 
-          {/* Visual Preview Sidebar */}
           <div className="space-y-6">
             <Card className="ring-2 ring-primary">
               <CardHeader className="pb-4">
