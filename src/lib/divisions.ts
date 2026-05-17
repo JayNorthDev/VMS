@@ -1,5 +1,23 @@
 import { Division } from './types';
 
+/**
+ * Generates a clean, English-only prefix for the division.
+ * Handles station names with numeric suffixes (e.g., "District 01" -> "1").
+ */
+export function getPrefix(name: string) {
+  return name.split(/[\s,]+/)
+    .map(word => {
+      // Look for numbers first (handle 01, 02 etc)
+      const numbers = word.match(/\d+/)?.[0]?.replace(/^0+/, '');
+      if (numbers) return numbers;
+      // Otherwise take the first letter of alphabetic words
+      const firstLetter = word.match(/[a-zA-Z]/)?.[0];
+      return firstLetter || '';
+    })
+    .join('')
+    .toUpperCase();
+}
+
 export const divisionData: Division[] = [
     { id: "1", en: "Superintendent of Police Office", si: "පොලිස් අධිකාරී කාර්යාලය", color: "#2563EB", text: "#FFFFFF", max: 20 },
     { id: "2", en: "ASP Office, Badulla Dist 01", si: "සහකාර පොලිස් අධිකාරී කාර්යාලය බදුල්ල 01", color: "#16A34A", text: "#FFFFFF", max: 20 },

@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -62,7 +61,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
-import { divisionData } from '@/lib/divisions';
+import { divisionData, getPrefix } from '@/lib/divisions';
 import type { VisitorEntry, UserProfile, IDCard } from '@/lib/types';
 import { logAuditAction } from '@/lib/audit';
 import {
@@ -93,19 +92,19 @@ const checkInSchema = z
     if (identificationType === 'NIC') {
       const nicRegex = /(^\d{9}[VX]$)|(^\d{12}$)/;
       if (!nicRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid NIC. Expected 9 digits + V/X or 12 digits.', path: ['identificationNumber'] });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid NIC format. Expected 9 digits + V/X or 12 digits.', path: ['identificationNumber'] });
       }
     }
     if (identificationType === 'Driving License') {
       const dlRegex = /^B\d{7}$/;
       if (!dlRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Driving License. Expected format: B1234567.', path: ['identificationNumber'] });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid DL format. Expected B + 7 digits.', path: ['identificationNumber'] });
       }
     }
     if (identificationType === 'Passport') {
       const passportRegex = /^[A-Z]{1,2}\d{7,9}$/;
       if (!passportRegex.test(identificationNumber.toUpperCase())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Passport. Expected 1-2 letters and 7-9 digits.', path: ['identificationNumber'] });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Passport format. Expected 1-2 letters + 7-9 digits.', path: ['identificationNumber'] });
       }
     }
   });
@@ -237,8 +236,12 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   useEffect(() => {
     async function fetchCards() {
       if (!firestore || !selectedDivisionId) { setAvailableCards([]); return; }
+      const division = divisionData.find(d => d.id === selectedDivisionId);
+      if (!division) return;
+      const prefix = getPrefix(division.en);
+      
       const q = query(
-        collection(firestore, 'generated_id_cards', selectedDivisionId, 'cards'), 
+        collection(firestore, 'generated_id_cards', prefix, 'cards'), 
         where('status', '==', 'available')
       );
       const snapshot = await getDocs(q);
@@ -246,11 +249,6 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
     }
     fetchCards();
   }, [firestore, selectedDivisionId]);
-
-  const form = useForm<CheckInFormValues>({
-    resolver: zodResolver(checkInSchema),
-    defaultValues: { identificationType: '', identificationNumber: '', fullName: '', gender: '', address: '', allocatedCardId: '' },
-  });
 
   const handleQRScan = (decodedText: string) => {
     const decrypted = decryptQRData(decodedText);
@@ -268,6 +266,11 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
     toast({ title: 'Card Linked', description: `Card No: ${cardId} has been selected.` });
   };
 
+  const form = useForm<CheckInFormValues>({
+    resolver: zodResolver(checkInSchema),
+    defaultValues: { identificationType: '', identificationNumber: '', fullName: '', gender: '', address: '', allocatedCardId: '' },
+  });
+
   const onSubmit = (values: CheckInFormValues) => {
     if (!selectedDivisionId) { toast({ variant: 'destructive', title: 'Required', description: 'Select a division first.' }); return; }
     setTempVisitorData({ ...values, divisionId: selectedDivisionId });
@@ -277,6 +280,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   const confirmCheckIn = async () => {
     if (!firestore || !tempVisitorData) return;
     const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
+    const prefix = getPrefix(division.en);
     
     try {
       const newVisitorRef = doc(collection(firestore, 'visitorEntries'));
@@ -295,7 +299,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       await setDoc(newVisitorRef, newEntry);
       
       if (tempVisitorData.allocatedCardId) {
-        await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.divisionId, 'cards', tempVisitorData.allocatedCardId), {
+        await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', tempVisitorData.allocatedCardId), {
           status: 'allocated',
           currentVisitorId: visitorId
         });
@@ -419,9 +423,12 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
 
   const handleCheckOut = async (v: WithId<VisitorEntry>, taskStatus: 'Completed' | 'Incomplete') => {
     if (!firestore) return;
+    const division = divisionData.find(d => d.id === v.divisionId);
+    const prefix = division ? getPrefix(division.en) : v.divisionId;
+
     await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), taskStatus });
     if (v.allocatedCardId) {
-      await updateDoc(doc(firestore, 'generated_id_cards', v.divisionId, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
+      await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
     }
     logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Status: ${taskStatus}`);
     toast({ title: 'Visitor Checked Out' });

@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -19,8 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useFirebase } from '@/firebase';
-import { collection, doc, setDoc, Timestamp, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-import { divisionData } from '@/lib/divisions';
+import { collection, doc, setDoc, Timestamp, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { divisionData, getPrefix } from '@/lib/divisions';
 import { generateQRPayload } from '@/lib/qr-security';
 import { logAuditAction } from '@/lib/audit';
 import { useAuth } from '@/hooks/useAuth';
@@ -29,24 +28,6 @@ import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
-
-/**
- * Generates a clean, English-only prefix for the division.
- * Handles station names with numeric suffixes (e.g., "District 01" -> "1").
- */
-function getPrefix(name: string) {
-  return name.split(/[\s,]+/)
-    .map(word => {
-      // Look for numbers first (handle 01, 02 etc)
-      const numbers = word.match(/\d+/)?.[0]?.replace(/^0+/, '');
-      if (numbers) return numbers;
-      // Otherwise take the first letter of alphabetic words
-      const firstLetter = word.match(/[a-zA-Z]/)?.[0];
-      return firstLetter || '';
-    })
-    .join('')
-    .toUpperCase();
-}
 
 export default function CardManagementPage() {
   const { userData, loading: authLoading } = useAuth();
@@ -90,7 +71,11 @@ export default function CardManagementPage() {
     }
     
     try {
-      const cardsCol = collection(firestore, 'generated_id_cards', divisionId, 'cards');
+      const division = divisionData.find(d => d.id === divisionId);
+      if (!division) return;
+      const prefix = getPrefix(division.en);
+      
+      const cardsCol = collection(firestore, 'generated_id_cards', prefix, 'cards');
       const q = query(
         cardsCol, 
         orderBy('cardId', 'desc'), 
@@ -132,7 +117,11 @@ export default function CardManagementPage() {
       }
       setIsCheckingExport(true);
       try {
-        const cardsCol = collection(firestore, 'generated_id_cards', exportDivisionId, 'cards');
+        const division = divisionData.find(d => d.id === exportDivisionId);
+        if (!division) return;
+        const prefix = getPrefix(division.en);
+        
+        const cardsCol = collection(firestore, 'generated_id_cards', prefix, 'cards');
         const querySnapshot = await getDocs(cardsCol);
         setExistingCount(querySnapshot.size);
       } catch (error) {
@@ -156,13 +145,13 @@ export default function CardManagementPage() {
 
     setIsGenerating(true);
     const division = divisionData.find(d => d.id === selectedDivisionId)!;
-    const cardsCol = collection(firestore, 'generated_id_cards', selectedDivisionId, 'cards');
+    const prefix = getPrefix(division.en);
+    const cardsCol = collection(firestore, 'generated_id_cards', prefix, 'cards');
     
     try {
       const pdf = new jsPDF('p', 'mm', [85.6, 54]);
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const prefix = getPrefix(division.en);
 
       for (let i = 1; i <= quantity; i++) {
         const currentNum = lastSequence + i;
@@ -218,13 +207,14 @@ export default function CardManagementPage() {
 
     setIsExporting(true);
     const division = divisionData.find(d => d.id === exportDivisionId)!;
+    const prefix = getPrefix(division.en);
     
     try {
       const zip = new JSZip();
       const qrFolder = zip.folder("qr_images");
       let csvContent = "Card_Number,@QR_Image\n";
 
-      const cardsCol = collection(firestore, 'generated_id_cards', exportDivisionId, 'cards');
+      const cardsCol = collection(firestore, 'generated_id_cards', prefix, 'cards');
       const querySnapshot = await getDocs(cardsCol);
 
       if (querySnapshot.empty) {
