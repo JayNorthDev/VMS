@@ -24,6 +24,7 @@ import { generateQRPayload } from '@/lib/qr-security';
 import { logAuditAction } from '@/lib/audit';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
@@ -266,39 +267,98 @@ export default function CardManagementPage() {
   const selectedDivision = divisionData.find(d => d.id === selectedDivisionId);
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
-      <Button variant="ghost" className="mb-6" onClick={() => router.back()}>
-        <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
-      </Button>
+    <SidebarProvider>
+      <div className="max-w-6xl mx-auto py-8 px-4 w-full h-full">
+        <Button variant="ghost" className="mb-6" onClick={() => router.back()}>
+          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Dashboard
+        </Button>
 
-      <div className="flex items-center gap-3 mb-10">
-        <ShieldCheck className="h-10 w-10 text-primary" />
-        <div>
-          <h1 className="text-3xl font-bold">ID Card Management</h1>
-          <p className="text-muted-foreground">Configure, generate, and export secure visitor identification cards.</p>
+        <div className="flex items-center gap-3 mb-10">
+          <ShieldCheck className="h-10 w-10 text-primary" />
+          <div>
+            <h1 className="text-3xl font-bold">ID Card Management</h1>
+            <p className="text-muted-foreground">Configure, generate, and export secure visitor identification cards.</p>
+          </div>
         </div>
-      </div>
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        {/* Section A: Batch Generation */}
-        <div className="lg:col-span-2 space-y-8">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Hash className="h-6 w-6 text-primary" />
-                Section A: Batch Generation
-              </CardTitle>
-              <CardDescription>
-                Create NEW ID card records in the database and download a printable PDF.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid gap-8 lg:grid-cols-3">
+          {/* Section A: Batch Generation */}
+          <div className="lg:col-span-2 space-y-8">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Hash className="h-6 w-6 text-primary" />
+                  Section A: Batch Generation
+                </CardTitle>
+                <CardDescription>
+                  Create NEW ID card records in the database and download a printable PDF.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      <Building className="h-4 w-4" /> Select Division
+                    </label>
+                    <Select value={selectedDivisionId} onValueChange={setSelectedDivisionId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose a division..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {divisionData.map(div => (
+                          <SelectItem key={div.id} value={div.id}>{div.en}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Current highest sequence: {lastSequence}</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium flex items-center gap-2">
+                      <CreditCard className="h-4 w-4" /> Quantity
+                    </label>
+                    <Input 
+                      type="number" 
+                      min={1} 
+                      max={50} 
+                      value={quantity} 
+                      onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+                    />
+                    <p className="text-xs text-muted-foreground">Cards will start from {lastSequence + 1}</p>
+                  </div>
+                </div>
+
+                <Button 
+                  className="w-full h-12 text-lg" 
+                  onClick={handleGenerateCards} 
+                  disabled={isGenerating || !selectedDivisionId}
+                >
+                  {isGenerating ? "Processing..." : (
+                    <>
+                      <Download className="mr-2 h-5 w-5" /> Generate & Download PDF
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Section B: Export Printing Data */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileSpreadsheet className="h-6 w-6 text-primary" />
+                  Section B: Export Printing Data
+                </CardTitle>
+                <CardDescription>
+                  Export existing card records for external printing (ZIP with CSV and QR Images).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-medium flex items-center gap-2">
-                    <Building className="h-4 w-4" /> Select Division
+                    <Building className="h-4 w-4" /> Select Division for Export
                   </label>
-                  <Select value={selectedDivisionId} onValueChange={setSelectedDivisionId}>
+                  <Select value={exportDivisionId} onValueChange={setExportDivisionId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Choose a division..." />
                     </SelectTrigger>
@@ -308,159 +368,102 @@ export default function CardManagementPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">Current highest sequence: {lastSequence}</p>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-sm font-medium flex items-center gap-2">
-                    <CreditCard className="h-4 w-4" /> Quantity
-                  </label>
-                  <Input 
-                    type="number" 
-                    min={1} 
-                    max={50} 
-                    value={quantity} 
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                  />
-                  <p className="text-xs text-muted-foreground">Cards will start from {lastSequence + 1}</p>
-                </div>
-              </div>
-
-              <Button 
-                className="w-full h-12 text-lg" 
-                onClick={handleGenerateCards} 
-                disabled={isGenerating || !selectedDivisionId}
-              >
-                {isGenerating ? "Processing..." : (
-                  <>
-                    <Download className="mr-2 h-5 w-5" /> Generate & Download PDF
-                  </>
+                {exportDivisionId && !isCheckingExport && (
+                  <div className={`p-4 rounded-lg flex items-start gap-3 border ${existingCount && existingCount > 0 ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-orange-50 border-orange-100 text-orange-800'}`}>
+                    {existingCount && existingCount > 0 ? (
+                      <>
+                        <FileArchive className="h-5 w-5 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-sm">Found {existingCount} existing cards.</p>
+                          <p className="text-xs opacity-80">Ready to export for high-quality printing.</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-5 w-5 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-sm">No cards found.</p>
+                          <p className="text-xs opacity-80">Please use the generation section above to create cards for this division first.</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
-              </Button>
-            </CardContent>
-          </Card>
 
-          {/* Section B: Export Printing Data */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileSpreadsheet className="h-6 w-6 text-primary" />
-                Section B: Export Printing Data
-              </CardTitle>
-              <CardDescription>
-                Export existing card records for external printing (ZIP with CSV and QR Images).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-sm font-medium flex items-center gap-2">
-                  <Building className="h-4 w-4" /> Select Division for Export
-                </label>
-                <Select value={exportDivisionId} onValueChange={setExportDivisionId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a division..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {divisionData.map(div => (
-                      <SelectItem key={div.id} value={div.id}>{div.en}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {exportDivisionId && !isCheckingExport && (
-                <div className={`p-4 rounded-lg flex items-start gap-3 border ${existingCount && existingCount > 0 ? 'bg-blue-50 border-blue-100 text-blue-800' : 'bg-orange-50 border-orange-100 text-orange-800'}`}>
-                  {existingCount && existingCount > 0 ? (
+                <Button 
+                  variant="secondary"
+                  className="w-full h-12 text-lg border-2 border-primary/10" 
+                  onClick={handleExportZip} 
+                  disabled={isExporting || !existingCount || existingCount === 0}
+                >
+                  {isExporting ? "Compressing ZIP..." : (
                     <>
-                      <FileArchive className="h-5 w-5 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-sm">Found {existingCount} existing cards.</p>
-                        <p className="text-xs opacity-80">Ready to export for high-quality printing.</p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-5 w-5 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-sm">No cards found.</p>
-                        <p className="text-xs opacity-80">Please use the generation section above to create cards for this division first.</p>
-                      </div>
+                      <FileArchive className="mr-2 h-5 w-5" /> Generate & Download ZIP
                     </>
                   )}
-                </div>
-              )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
 
-              <Button 
-                variant="secondary"
-                className="w-full h-12 text-lg border-2 border-primary/10" 
-                onClick={handleExportZip} 
-                disabled={isExporting || !existingCount || existingCount === 0}
-              >
-                {isExporting ? "Compressing ZIP..." : (
-                  <>
-                    <FileArchive className="mr-2 h-5 w-5" /> Generate & Download ZIP
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Visual Preview Sidebar */}
-        <div className="space-y-6">
-          <Card className="ring-2 ring-primary">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-lg">Visual Preview</CardTitle>
-              <CardDescription>Mockup of the card layout.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center">
-              {selectedDivision ? (
-                <div 
-                  className="w-full max-w-[240px] aspect-[54/85.6] rounded-xl shadow-2xl flex flex-col items-center p-6 text-center border border-white/20 transition-all duration-300"
-                  style={{ 
-                    backgroundColor: selectedDivision.color,
-                    color: selectedDivision.text
-                  }}
-                >
-                  <div className="flex flex-col items-center mb-4">
-                    <Image src="/logo.png" alt="Logo" width={32} height={32} className="mb-1" />
-                    <h3 className="font-bold text-[10px] uppercase tracking-tighter">Visitor ID Card</h3>
-                  </div>
-                  
-                  <div className="text-7xl font-black my-4 tabular-nums">
-                    {(lastSequence + 1).toString().padStart(2, '0')}
-                  </div>
-                  
-                  <div className="mt-auto w-full">
-                    <p className="text-[10px] font-bold leading-tight">{selectedDivision.en}</p>
-                    <div className="mt-4 bg-white p-2 rounded-lg inline-block shadow-inner">
-                      <div className="w-20 h-20 bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">
-                        <CreditCard className="text-gray-400 h-8 w-8" />
-                      </div>
+          {/* Visual Preview Sidebar */}
+          <div className="space-y-6">
+            <Card className="ring-2 ring-primary">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Visual Preview</CardTitle>
+                <CardDescription>Mockup of the card layout.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center">
+                {selectedDivision ? (
+                  <div 
+                    className="w-full max-w-[240px] aspect-[54/85.6] rounded-xl shadow-2xl flex flex-col items-center p-6 text-center border border-white/20 transition-all duration-300"
+                    style={{ 
+                      backgroundColor: selectedDivision.color,
+                      color: selectedDivision.text
+                    }}
+                  >
+                    <div className="flex flex-col items-center mb-4">
+                      <Image src="/logo.png" alt="Logo" width={32} height={32} className="mb-1" />
+                      <h3 className="font-bold text-[10px] uppercase tracking-tighter">Visitor ID Card</h3>
                     </div>
-                    <p className="text-[7px] mt-4 opacity-70">
-                      ID: {getPrefix(selectedDivision.en)}-{(lastSequence + 1).toString().padStart(3, '0')}
-                    </p>
+                    
+                    <div className="text-7xl font-black my-4 tabular-nums">
+                      {(lastSequence + 1).toString().padStart(2, '0')}
+                    </div>
+                    
+                    <div className="mt-auto w-full">
+                      <p className="text-[10px] font-bold leading-tight">{selectedDivision.en}</p>
+                      <div className="mt-4 bg-white p-2 rounded-lg inline-block shadow-inner">
+                        <div className="w-20 h-20 bg-gray-100 flex items-center justify-center border border-dashed border-gray-300">
+                          <CreditCard className="text-gray-400 h-8 w-8" />
+                        </div>
+                      </div>
+                      <p className="text-[7px] mt-4 opacity-70">
+                        ID: {getPrefix(selectedDivision.en)}-{(lastSequence + 1).toString().padStart(3, '0')}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="w-full max-w-[240px] aspect-[54/85.6] border-2 border-dashed rounded-xl flex items-center justify-center text-muted-foreground p-8 text-center text-sm bg-muted/30">
-                  Select a division to see card design.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          
-          <div className="bg-muted/50 rounded-lg p-4 border text-xs text-muted-foreground space-y-2">
-            <p className="font-semibold text-primary">Printing Notes:</p>
-            <ul className="list-disc pl-4 space-y-1">
-              <li>PDF format is optimized for direct A4/Letter printers.</li>
-              <li>ZIP format is recommended for BarTender, Zebra, or Epson dedicated label printers.</li>
-              <li>QR codes in ZIP are high-resolution (1024x1024) for optimal scanning.</li>
-            </ul>
+                ) : (
+                  <div className="w-full max-w-[240px] aspect-[54/85.6] border-2 border-dashed rounded-xl flex items-center justify-center text-muted-foreground p-8 text-center text-sm bg-muted/30">
+                    Select a division to see card design.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            
+            <div className="bg-muted/50 rounded-lg p-4 border text-xs text-muted-foreground space-y-2">
+              <p className="font-semibold text-primary">Printing Notes:</p>
+              <ul className="list-disc pl-4 space-y-1">
+                <li>PDF format is optimized for direct A4/Letter printers.</li>
+                <li>ZIP format is recommended for BarTender, Zebra, or Epson dedicated label printers.</li>
+                <li>QR codes in ZIP are high-resolution (1024x1024) for optimal scanning.</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }

@@ -24,7 +24,7 @@ import { collection, doc, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData, getPrefix } from '@/lib/divisions';
 import type { VisitorEntry, UserProfile, IDCard } from '@/lib/types';
-import { Sidebar, SidebarContent, SidebarMenuItem, SidebarMenu, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarInset } from '@/components/ui/sidebar';
+import { Sidebar, SidebarContent, SidebarMenuItem, SidebarMenu, SidebarMenuButton, SidebarHeader, SidebarFooter, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { startOfToday } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
@@ -177,50 +177,52 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-100 dark:bg-gray-900">
-      <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground">
-        <SidebarHeader className="p-6">
-          <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="Logo" width={40} height={40} />
-            <div className="flex flex-col"><h1 className="text-xl font-bold leading-none">Admin Panel</h1><span className="text-[10px] opacity-60 uppercase tracking-widest">Badulla Police Station</span></div>
-          </div>
-        </SidebarHeader>
-        <SidebarContent className="px-3">
-          <SidebarMenu>
-            {availableNavItems.map(item => (
-                 <SidebarMenuItem key={item.id}>
-                    <SidebarMenuButton isActive={activeView === item.id} onClick={() => setActiveView(item.id)}>
-                        {item.icon} <span className="ml-2 font-medium">{item.label}</span>
-                    </SidebarMenuButton>
+    <SidebarProvider>
+      <div className="flex min-h-screen w-full bg-gray-100 dark:bg-gray-900">
+        <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground">
+          <SidebarHeader className="p-6">
+            <div className="flex items-center gap-3">
+              <Image src="/logo.png" alt="Logo" width={40} height={40} />
+              <div className="flex flex-col"><h1 className="text-xl font-bold leading-none">Admin Panel</h1><span className="text-[10px] opacity-60 uppercase tracking-widest">Badulla Police Station</span></div>
+            </div>
+          </SidebarHeader>
+          <SidebarContent className="px-3">
+            <SidebarMenu>
+              {availableNavItems.map(item => (
+                  <SidebarMenuItem key={item.id}>
+                      <SidebarMenuButton isActive={activeView === item.id} onClick={() => setActiveView(item.id)}>
+                          {item.icon} <span className="ml-2 font-medium">{item.label}</span>
+                      </SidebarMenuButton>
+                  </SidebarMenuItem>
+              ))}
+              {(userData?.permissions?.includes('Card Management') || userData?.permissions?.includes('Access Management')) && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
+                    <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
-            ))}
-            {(userData?.permissions?.includes('Card Management') || userData?.permissions?.includes('Access Management')) && (
-              <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => router.push('/admin/cards')}>
-                  <CreditCard /> <span className="ml-2 font-medium">Card Management</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
-          </SidebarMenu>
-        </SidebarContent>
-        <SidebarFooter className="p-4 border-t border-sidebar-border">
-           <div className="flex items-center gap-3 mb-4">
-              <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-sm">
-                {userData?.name?.charAt(0) || "U"}
-              </div>
-              <div className="flex flex-col">
-                <span className="text-sm font-semibold">{userData.name}</span>
-                <span className="text-[10px] opacity-60">{userData.role}</span>
-              </div>
-          </div>
-          <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground" onClick={handleSignOut}>
-              <LogOut className="h-4 w-4 mr-2" /> Sign Out
-          </Button>
-        </SidebarFooter>
-      </Sidebar>
-      <SidebarInset className="flex-1 p-8">
-        {renderContent()}
-      </SidebarInset>
-    </div>
+              )}
+            </SidebarMenu>
+          </SidebarContent>
+          <SidebarFooter className="p-4 border-t border-sidebar-border">
+            <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-sm">
+                  {userData?.name?.charAt(0) || "U"}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-sm font-semibold">{userData.name}</span>
+                  <span className="text-[10px] opacity-60">{userData.role}</span>
+                </div>
+            </div>
+            <Button variant="ghost" className="w-full justify-start text-sidebar-foreground hover:bg-destructive hover:text-destructive-foreground" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-2" /> Sign Out
+            </Button>
+          </SidebarFooter>
+        </Sidebar>
+        <SidebarInset className="flex-1 p-8">
+          {renderContent()}
+        </SidebarInset>
+      </div>
+    </SidebarProvider>
   );
 }
