@@ -22,7 +22,7 @@ export interface VisitorEntry {
   checkInTime: Timestamp;
   status: 'IN' | 'OUT';
   checkOutTime?: Timestamp;
-  taskStatus?: 'Completed' | 'Incomplete';
+  outcome?: 'Completed' | 'Pending';
   divisionEnglishName?: string;
   divisionSinhalaName?: string;
   divisionBackgroundColorHex?: string;

@@ -1,3 +1,4 @@
+
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -95,7 +96,7 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
         return {
             today: allVisitors.filter(v => v.checkInTime && v.checkInTime.toDate() >= todayStart).length,
             active: allVisitors.filter(v => v.status === 'IN').length,
-            completed: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.taskStatus === 'Completed').length,
+            completed: allVisitors.filter(v => v.checkOutTime && v.checkOutTime.toDate() >= todayStart && v.outcome === 'Completed').length,
             pending: allVisitors.filter(v => v.status === 'IN').length,
         }
     }, [allVisitors]);
@@ -405,7 +406,7 @@ const VisitorHistoryView = ({ visitors, isLoading }: any) => (
                 <TableCell className="text-xs">{v.divisionEnglishName}</TableCell>
                 <TableCell className="text-[10px] tabular-nums">{format(v.checkInTime.toDate(), 'MM/dd HH:mm')}</TableCell>
                 <TableCell className="text-[10px] tabular-nums">{v.checkOutTime ? format(v.checkOutTime.toDate(), 'MM/dd HH:mm') : '-'}</TableCell>
-                <TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'} className="text-[10px]">{v.taskStatus}</Badge></TableCell>
+                <TableCell><Badge variant={v.outcome === 'Completed' ? 'default' : 'destructive'} className="text-[10px]">{v.outcome || 'Unknown'}</Badge></TableCell>
               </TableRow>
             ))
           }

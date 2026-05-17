@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -405,6 +406,24 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
   const { toast } = useToast();
   const [isScanning, setIsScanning] = useState(false);
 
+  const handleCheckOut = async (v: WithId<VisitorEntry>, outcome: 'Completed' | 'Pending') => {
+    if (!firestore) return;
+    try {
+      const division = divisionData.find(d => d.id === v.divisionId);
+      const prefix = division ? getPrefix(division.en) : v.allocatedCardId?.split('-')[0] || v.divisionId;
+
+      await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), outcome });
+      if (v.allocatedCardId) {
+        await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
+      }
+      logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Outcome: ${outcome}`);
+      toast({ title: 'Visitor Checked Out' });
+    } catch (error) {
+      console.error('Check-out error:', error);
+      toast({ variant: 'destructive', title: 'Error', description: 'Failed to process check-out.' });
+    }
+  };
+
   const handleQRScan = (decodedText: string) => {
     try {
       const decrypted = decryptQRData(decodedText);
@@ -420,24 +439,6 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
       toast({ title: 'Card Identified', description: `Visitor: ${visitor.fullName}` });
     } catch (e) {
       console.error('Scan error:', e);
-    }
-  };
-
-  const handleCheckOut = async (v: WithId<VisitorEntry>, taskStatus: 'Completed' | 'Incomplete') => {
-    if (!firestore) return;
-    try {
-      const division = divisionData.find(d => d.id === v.divisionId);
-      const prefix = division ? getPrefix(division.en) : v.allocatedCardId?.split('-')[0] || v.divisionId;
-
-      await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), taskStatus });
-      if (v.allocatedCardId) {
-        await updateDoc(doc(firestore, 'generated_id_cards', prefix, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
-      }
-      logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Status: ${taskStatus}`);
-      toast({ title: 'Visitor Checked Out' });
-    } catch (error) {
-      console.error('Check-out error:', error);
-      toast({ variant: 'destructive', title: 'Error', description: 'Failed to process check-out.' });
     }
   };
 
@@ -465,8 +466,8 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
                   <TableCell><Badge variant="outline">{v.allocatedCardId || 'None'}</Badge></TableCell>
                   <TableCell className="text-xs">{v.checkInTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
                   <TableCell className="text-right space-x-2">
-                    <Button size="sm" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Done</Button>
-                    <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Incomplete')}><X className="h-4 w-4 mr-1"/> Pending</Button>
+                    <Button size="sm" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Completed</Button>
+                    <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Pending')}><X className="h-4 w-4 mr-1"/> Incomplete</Button>
                   </TableCell>
                 </TableRow>
               ))
@@ -490,7 +491,7 @@ const HistoryView = ({ visitors, isLoading }: any) => (
     <CardHeader><CardTitle>Visitor History</CardTitle></CardHeader>
     <CardContent>
       <Table>
-        <TableHeader><TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>Time In</TableHead><TableHead>Time Out</TableHead><TableHead>Task</TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>Time In</TableHead><TableHead>Time Out</TableHead><TableHead>Outcome</TableHead></TableRow></TableHeader>
         <TableBody>
           {isLoading ? <TableRow><TableCell colSpan={5} className="text-center py-8">Loading...</TableCell></TableRow> : 
             visitors.map((v: any) => (
@@ -499,7 +500,7 @@ const HistoryView = ({ visitors, isLoading }: any) => (
                 <TableCell>{v.divisionEnglishName}</TableCell>
                 <TableCell className="text-xs">{v.checkInTime.toDate().toLocaleString()}</TableCell>
                 <TableCell className="text-xs">{v.checkOutTime?.toDate().toLocaleString()}</TableCell>
-                <TableCell><Badge variant={v.taskStatus === 'Completed' ? 'default' : 'destructive'}>{v.taskStatus}</Badge></TableCell>
+                <TableCell><Badge variant={v.outcome === 'Completed' ? 'default' : 'destructive'}>{v.outcome || 'Unknown'}</Badge></TableCell>
               </TableRow>
             ))
           }
