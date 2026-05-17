@@ -1,4 +1,3 @@
-
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -162,7 +161,6 @@ const ActiveByDivisionView = () => {
   const { firestore } = useFirebase();
   const [errorLogged, setErrorLogged] = useState(false);
 
-  // We use collectionGroup to find all cards with 'allocated' status across all division prefixes
   const activeCardsQuery = useMemoFirebase(() => {
     if (!firestore) return null;
     try {
@@ -392,21 +390,29 @@ const AuditTrailView = () => {
 
 const VisitorHistoryView = ({ visitors, isLoading }: any) => (
   <div className="space-y-6">
-    <div><h2 className="text-2xl font-bold">Station Traffic History</h2><p className="text-muted-foreground">Comprehensive record of all past visitor movements.</p></div>
+    <div><h2 className="text-2xl font-bold">Station Traffic History</h2><p className="text-muted-foreground">Comprehensive record of all station visitor movements.</p></div>
     <Card>
       <Table>
         <TableHeader>
-          <TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>In</TableHead><TableHead>Out</TableHead><TableHead>Outcome</TableHead></TableRow>
+          <TableRow><TableHead>Visitor</TableHead><TableHead>Division</TableHead><TableHead>In</TableHead><TableHead>Out</TableHead><TableHead>Status / Outcome</TableHead></TableRow>
         </TableHeader>
         <TableBody>
           {isLoading ? <TableRow><TableCell colSpan={5} className="text-center py-8">Loading records...</TableCell></TableRow> : 
-            visitors.filter((v: any) => v.status === 'OUT').map((v: any) => (
+            visitors.map((v: any) => (
               <TableRow key={v.id}>
                 <TableCell><div className="font-bold">{v.fullName}</div><div className="text-xs opacity-60">{v.identificationNumber}</div></TableCell>
                 <TableCell className="text-xs">{v.divisionEnglishName}</TableCell>
-                <TableCell className="text-[10px] tabular-nums">{format(v.checkInTime.toDate(), 'MM/dd HH:mm')}</TableCell>
+                <TableCell className="text-[10px] tabular-nums">{v.checkInTime ? format(v.checkInTime.toDate(), 'MM/dd HH:mm') : '-'}</TableCell>
                 <TableCell className="text-[10px] tabular-nums">{v.checkOutTime ? format(v.checkOutTime.toDate(), 'MM/dd HH:mm') : '-'}</TableCell>
-                <TableCell><Badge variant={v.outcome === 'Completed' ? 'default' : 'destructive'} className="text-[10px]">{v.outcome || 'Unknown'}</Badge></TableCell>
+                <TableCell>
+                  {v.status === 'IN' ? (
+                    <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">Active (Inside)</Badge>
+                  ) : (
+                    <Badge variant={v.outcome === 'Completed' ? 'default' : 'destructive'} className="text-[10px]">
+                      {v.outcome || 'Unknown'}
+                    </Badge>
+                  )}
+                </TableCell>
               </TableRow>
             ))
           }
@@ -447,7 +453,7 @@ export default function AdminPage() {
     }
   }, [availableNavItems, activeView]);
 
-  const visitorEntriesQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'visitorEntries') : null), [firestore]);
+  const visitorEntriesQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'visitorEntries'), orderBy('checkInTime', 'desc')) : null), [firestore]);
   const { data: allVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
 
   useEffect(() => {
@@ -476,7 +482,7 @@ export default function AdminPage() {
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen w-full bg-slate-50 dark:bg-slate-950">
+      <div className="flex min-h-screen w-full bg-sidebar dark:bg-slate-950">
         <Sidebar className="flex flex-col bg-sidebar text-sidebar-foreground border-r">
           <SidebarHeader className="p-6">
             <div className="flex items-center gap-3">
@@ -519,7 +525,7 @@ export default function AdminPage() {
             </Button>
           </SidebarFooter>
         </Sidebar>
-        <SidebarInset className="flex-1 p-4 md:p-8 overflow-y-auto">
+        <SidebarInset className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50">
           <div className="max-w-7xl mx-auto">{renderContent()}</div>
         </SidebarInset>
       </div>
