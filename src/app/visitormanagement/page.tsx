@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -236,7 +237,10 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   useEffect(() => {
     async function fetchCards() {
       if (!firestore || !selectedDivisionId) { setAvailableCards([]); return; }
-      const q = query(collection(firestore, 'generated_id_cards'), where('divisionId', '==', selectedDivisionId), where('status', '==', 'available'));
+      const q = query(
+        collection(firestore, 'generated_id_cards', selectedDivisionId, 'cards'), 
+        where('status', '==', 'available')
+      );
       const snapshot = await getDocs(q);
       setAvailableCards(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard)));
     }
@@ -291,7 +295,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       await setDoc(newVisitorRef, newEntry);
       
       if (tempVisitorData.allocatedCardId) {
-        await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.allocatedCardId), {
+        await updateDoc(doc(firestore, 'generated_id_cards', tempVisitorData.divisionId, 'cards', tempVisitorData.allocatedCardId), {
           status: 'allocated',
           currentVisitorId: visitorId
         });
@@ -417,7 +421,7 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
     if (!firestore) return;
     await updateDoc(doc(firestore, 'visitorEntries', v.id), { status: 'OUT', checkOutTime: Timestamp.now(), taskStatus });
     if (v.allocatedCardId) {
-      await updateDoc(doc(firestore, 'generated_id_cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
+      await updateDoc(doc(firestore, 'generated_id_cards', v.divisionId, 'cards', v.allocatedCardId), { status: 'available', currentVisitorId: null });
     }
     logAuditAction(firestore, userProfile.name, 'Visitor Check-Out', `Visitor: ${v.fullName}, Status: ${taskStatus}`);
     toast({ title: 'Visitor Checked Out' });

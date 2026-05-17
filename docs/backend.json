@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "Division": {
@@ -157,6 +158,20 @@
         }
       },
       "required": ["timestamp", "userName", "action", "details"]
+    },
+    "IDCard": {
+      "title": "ID Card",
+      "type": "object",
+      "description": "Represents a physical ID card used for visitor management.",
+      "properties": {
+        "cardId": { "type": "string" },
+        "divisionId": { "type": "string" },
+        "qrCodeData": { "type": "string" },
+        "status": { "type": "string", "enum": ["available", "allocated", "lost"] },
+        "currentVisitorId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["cardId", "divisionId", "qrCodeData", "status", "createdAt"]
     }
   },
   "auth": {
@@ -173,7 +188,7 @@
           "schema": {
             "$ref": "#/backend/entities/Division"
           },
-          "description": "Stores static configuration details for each police station division. Each document represents a distinct division with its name, capacity, and display preferences.",
+          "description": "Stores static configuration details for each police station division.",
           "params": [
             {
               "name": "divisionId",
@@ -189,7 +204,7 @@
           "schema": {
             "$ref": "#/backend/entities/VisitorEntry"
           },
-          "description": "Records individual visitor check-in and check-out events. Includes denormalized 'divisionEnglishName', 'divisionSinhalaName', 'divisionBackgroundColorHex', and 'divisionTextColorHex' for authorization independence and historical data integrity.",
+          "description": "Records individual visitor check-in and check-out events.",
           "params": [
             {
               "name": "visitorEntryId",
@@ -205,7 +220,7 @@
           "schema": {
             "$ref": "#/backend/entities/UserProfile"
           },
-          "description": "Stores user profiles and roles for authorization. The document ID must match the Firebase Auth user UID.",
+          "description": "Stores user profiles and roles for authorization.",
           "params": [
             {
               "name": "userId",
@@ -221,7 +236,7 @@
           "schema": {
             "$ref": "#/backend/entities/AuditLog"
           },
-          "description": "Stores a chronological log of all significant user actions within the system for security and auditing purposes.",
+          "description": "Stores a chronological log of all significant user actions.",
           "params": [
             {
               "name": "auditLogId",
@@ -229,8 +244,21 @@
             }
           ]
         }
+      },
+      {
+        "path": "/generated_id_cards/{divisionId}/cards/{cardId}",
+        "definition": {
+          "entityName": "IDCard",
+          "schema": {
+            "$ref": "#/backend/entities/IDCard"
+          },
+          "description": "Stores generated ID cards organized by division sub-collections.",
+          "params": [
+            { "name": "divisionId", "description": "The ID of the division the cards belong to." },
+            { "name": "cardId", "description": "The unique card identifier." }
+          ]
+        }
       }
-    ],
-    "reasoning": "The recommended Firestore structure for the Visitor Management System prioritizes Authorization Independence and Queryability (QAPs) by using two top-level collections: `/divisions` for static configuration and `/visitorEntries` for all visitor records. This approach avoids hierarchical authorization dependencies that require `get()` calls in security rules, making the system more robust and easier to debug.\n\n1.  **Authorization Independence (Denormalization):** To ensure that `VisitorEntry` documents are self-contained and do not require fetching data from `/divisions` for display or authorization purposes, key details of the associated `Division` (such as `englishName`, `sinhalaName`, `backgroundColorHex`, `textColorHex`) will be denormalized directly into each `VisitorEntry` document at the time of check-in. This is crucial for maintaining historical accuracy, as past records will always reflect the division's details as they were at the time of the visit, even if the division's configuration changes later. This also means that security rules evaluating access to a `VisitorEntry` document do not need to perform `get()` operations on the `/divisions` collection.\n\n2.  **Structural Segregation (Homogeneous Security Posture):**\n    *   The `/divisions` collection stores static configuration data. Its security posture is likely read-only for general staff and writable only by an administrator.\n    *   The `/visitorEntries` collection stores all transactional visitor data, regardless of their `status` ('IN' or 'OUT'). All documents within this collection share the same security requirements, typically allowing authenticated staff to read, create, and update entries.\n\n3.  **QAPs (Rules are not Filters):** The single `/visitorEntries` collection, combined with an explicit `status` field (`IN` or 'OUT'), directly supports QAPs. For displaying 'Active Visitors' or 'Visitor History', client applications will issue `list` queries that include a `where('status', '==', 'IN')` or `where('status', '==', 'OUT')` clause, respectively. Firestore security rules can then easily validate that these `where` clauses are present and correct for `list` operations, preventing unauthorized broad data access and ensuring efficient queries without relying on client-side filtering of sensitive data. Because `divisionId` and the denormalized division details are directly within the `visitorEntry` document, no cross-collection `get()` operations are needed to fulfill these list queries, further simplifying rules and improving performance."
+    ]
   }
 }

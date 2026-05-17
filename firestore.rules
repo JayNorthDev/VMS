@@ -42,14 +42,10 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    match /generated_id_cards/{cardId} {
-      // Any authenticated staff can read available cards for check-in or allocated for check-out
+    match /generated_id_cards/{divisionId}/cards/{cardId} {
       allow get, list: if isSignedIn();
-      // Only admins can generate cards (bulk creation)
-      allow create: if isSignedIn() && isUserAdmin(request.auth.uid);
-      // Staff can update card status (allocate/de-allocate)
+      allow create, delete: if isSignedIn() && isUserAdmin(request.auth.uid);
       allow update: if isSignedIn();
-      allow delete: if isSignedIn() && isUserAdmin(request.auth.uid);
     }
   }
 }

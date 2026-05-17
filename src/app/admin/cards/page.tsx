@@ -1,6 +1,7 @@
+
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   CreditCard, 
@@ -28,6 +29,24 @@ import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
+
+/**
+ * Generates a clean, English-only prefix for the division.
+ * Handles station names with numeric suffixes (e.g., "District 01" -> "1").
+ */
+function getPrefix(name: string) {
+  return name.split(/[\s,]+/)
+    .map(word => {
+      // Look for numbers first (handle 01, 02 etc)
+      const numbers = word.match(/\d+/)?.[0]?.replace(/^0+/, '');
+      if (numbers) return numbers;
+      // Otherwise take the first letter of alphabetic words
+      const firstLetter = word.match(/[a-zA-Z]/)?.[0];
+      return firstLetter || '';
+    })
+    .join('')
+    .toUpperCase();
+}
 
 export default function CardManagementPage() {
   const { userData, loading: authLoading } = useAuth();
@@ -64,17 +83,16 @@ export default function CardManagementPage() {
   }, [userData, authLoading, router]);
 
   // Fetch last sequence number for the generation section
-  useEffect(() => {
-    async function fetchLastNum() {
-      if (!firestore || !selectedDivisionId) {
-        setLastSequence(0);
-        return;
-      }
-      
-      const cardsCol = collection(firestore, 'generated_id_cards');
+  const fetchLastNum = useCallback(async (divisionId: string) => {
+    if (!firestore || !divisionId) {
+      setLastSequence(0);
+      return;
+    }
+    
+    try {
+      const cardsCol = collection(firestore, 'generated_id_cards', divisionId, 'cards');
       const q = query(
         cardsCol, 
-        where('divisionId', '==', selectedDivisionId), 
         orderBy('cardId', 'desc'), 
         limit(1)
       );
@@ -91,9 +109,19 @@ export default function CardManagementPage() {
       } else {
         setLastSequence(0);
       }
+    } catch (error) {
+      console.error('Error fetching last sequence:', error);
+      setLastSequence(0);
     }
-    fetchLastNum();
-  }, [firestore, selectedDivisionId]);
+  }, [firestore]);
+
+  useEffect(() => {
+    if (selectedDivisionId) {
+      fetchLastNum(selectedDivisionId);
+    } else {
+      setLastSequence(0);
+    }
+  }, [selectedDivisionId, fetchLastNum]);
 
   // Check existing cards for the export section
   useEffect(() => {
@@ -104,9 +132,8 @@ export default function CardManagementPage() {
       }
       setIsCheckingExport(true);
       try {
-        const cardsCol = collection(firestore, 'generated_id_cards');
-        const q = query(cardsCol, where('divisionId', '==', exportDivisionId));
-        const querySnapshot = await getDocs(q);
+        const cardsCol = collection(firestore, 'generated_id_cards', exportDivisionId, 'cards');
+        const querySnapshot = await getDocs(cardsCol);
         setExistingCount(querySnapshot.size);
       } catch (error) {
         console.error('Error checking existing cards:', error);
@@ -129,16 +156,16 @@ export default function CardManagementPage() {
 
     setIsGenerating(true);
     const division = divisionData.find(d => d.id === selectedDivisionId)!;
-    const cardsCol = collection(firestore, 'generated_id_cards');
+    const cardsCol = collection(firestore, 'generated_id_cards', selectedDivisionId, 'cards');
     
     try {
       const pdf = new jsPDF('p', 'mm', [85.6, 54]);
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
+      const prefix = getPrefix(division.en);
 
       for (let i = 1; i <= quantity; i++) {
         const currentNum = lastSequence + i;
-        const prefix = division.en.split(' ').map(w => w[0]).join('').toUpperCase();
         const cardIdStr = `${prefix}-${currentNum.toString().padStart(3, '0')}`;
         const qrData = generateQRPayload(cardIdStr, selectedDivisionId);
 
@@ -174,7 +201,10 @@ export default function CardManagementPage() {
       logAuditAction(firestore, userData.name, 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
       pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
       toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
-      setLastSequence(lastSequence + quantity);
+      
+      // Reset state and refresh counter
+      setQuantity(1);
+      fetchLastNum(selectedDivisionId);
     } catch (error: any) {
       console.error(error);
       toast({ variant: 'destructive', title: 'Generation Failed', description: error.message });
@@ -194,9 +224,8 @@ export default function CardManagementPage() {
       const qrFolder = zip.folder("qr_images");
       let csvContent = "Card_Number,@QR_Image\n";
 
-      const cardsCol = collection(firestore, 'generated_id_cards');
-      const q = query(cardsCol, where('divisionId', '==', exportDivisionId));
-      const querySnapshot = await getDocs(q);
+      const cardsCol = collection(firestore, 'generated_id_cards', exportDivisionId, 'cards');
+      const querySnapshot = await getDocs(cardsCol);
 
       if (querySnapshot.empty) {
         toast({ variant: 'destructive', title: 'Error', description: 'No cards found for export.' });
@@ -210,8 +239,7 @@ export default function CardManagementPage() {
         const qrData = data.qrCodeData;
         const imageName = `${cardId}.png`;
 
-        // Using sequential index for Card_Number as requested
-        csvContent += `${index + 1},qr_images/${imageName}\n`;
+        csvContent += `${index + 1},${imageName}\n`;
         
         const qrDataUrl = await QRCode.toDataURL(qrData, { 
           margin: 1, 
@@ -421,7 +449,7 @@ export default function CardManagementPage() {
                       </div>
                     </div>
                     <p className="text-[7px] mt-4 opacity-70">
-                      ID: {selectedDivision.en.split(' ').map(w => w[0]).join('').toUpperCase()}-{(lastSequence + 1).toString().padStart(3, '0')}
+                      ID: {getPrefix(selectedDivision.en)}-{(lastSequence + 1).toString().padStart(3, '0')}
                     </p>
                   </div>
                 </div>
