@@ -18,6 +18,7 @@ import {
   BookUser,
   Scan,
   QrCode,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -218,6 +219,7 @@ const Navbar = ({ activeTab, setActiveTab, userProfile }: { activeTab: Tab; setA
 const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: string) => number; userProfile: UserProfile }) => {
   const [selectedDivisionId, setSelectedDivisionId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [tempVisitorData, setTempVisitorData] = useState<any>();
   const { toast } = useToast();
@@ -277,7 +279,9 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   };
 
   const confirmCheckIn = async () => {
-    if (!firestore || !tempVisitorData) return;
+    if (!firestore || !tempVisitorData || isSubmitting) return;
+    
+    setIsSubmitting(true);
     try {
       const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
       const prefix = getPrefix(division.en);
@@ -313,6 +317,8 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
     } catch (error: any) {
       console.error('Check-in error:', error);
       toast({ variant: 'destructive', title: 'Check-In Failed', description: error.message });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -376,12 +382,12 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
           </DialogContent>
         </Dialog>
       )}
-      {isModalOpen && tempVisitorData && <VerificationModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onConfirm={confirmCheckIn} visitorData={tempVisitorData} />}
+      {isModalOpen && tempVisitorData && <VerificationModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onConfirm={confirmCheckIn} visitorData={tempVisitorData} isSubmitting={isSubmitting} />}
     </div>
   );
 };
 
-const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData }: any) => {
+const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData, isSubmitting }: any) => {
   const division = divisionData.find(d => d.id === visitorData.divisionId)!;
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -393,8 +399,15 @@ const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData }: any) => 
           <div className="bg-black/10 p-3 rounded-lg"><div className="text-xs opacity-70">Card No</div><div className="font-bold">{visitorData.allocatedCardId || 'None'}</div></div>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20 text-white">Edit</Button>
-          <Button onClick={onConfirm} className="bg-white text-primary font-bold">Confirm & Save</Button>
+          <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20 text-white" disabled={isSubmitting}>Edit</Button>
+          <Button onClick={onConfirm} className="bg-white text-primary font-bold" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Checking In...
+              </>
+            ) : "Confirm & Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -405,9 +418,12 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const [isScanning, setIsScanning] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleCheckOut = async (v: WithId<VisitorEntry>, outcome: 'Completed' | 'Pending') => {
-    if (!firestore) return;
+    if (!firestore || isProcessing) return;
+    
+    setIsProcessing(true);
     try {
       const division = divisionData.find(d => d.id === v.divisionId);
       const prefix = division ? getPrefix(division.en) : v.allocatedCardId?.split('-')[0] || v.divisionId;
@@ -421,6 +437,8 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
     } catch (error) {
       console.error('Check-out error:', error);
       toast({ variant: 'destructive', title: 'Error', description: 'Failed to process check-out.' });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -466,8 +484,14 @@ const ActiveVisitorsView = ({ visitors, isLoading, searchValue, onSearchChange, 
                   <TableCell><Badge variant="outline">{v.allocatedCardId || 'None'}</Badge></TableCell>
                   <TableCell className="text-xs">{v.checkInTime.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</TableCell>
                   <TableCell className="text-right space-x-2">
-                    <Button size="sm" onClick={() => handleCheckOut(v, 'Completed')}><Check className="h-4 w-4 mr-1"/> Completed</Button>
-                    <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Pending')}><X className="h-4 w-4 mr-1"/> Incomplete</Button>
+                    <Button size="sm" onClick={() => handleCheckOut(v, 'Completed')} disabled={isProcessing}>
+                      {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 mr-1"/>} 
+                      Completed
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleCheckOut(v, 'Pending')} disabled={isProcessing}>
+                      {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4 mr-1"/>} 
+                      Incomplete
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
