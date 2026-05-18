@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -30,8 +31,6 @@ import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
 
-const SUPER_ADMIN_EMAIL = 'policevms@admin.com';
-
 export default function CardManagementPage() {
   const { user, userData, loading: authLoading } = useAuth();
   const { firestore } = useFirebase();
@@ -50,23 +49,22 @@ export default function CardManagementPage() {
   const [isCheckingExport, setIsCheckingExport] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  // Fixed Route Guard: Explicitly allow super admin
+  // Strictly rely on RBAC (Admin role + Card Management permission)
   useEffect(() => {
     if (!authLoading) {
-      const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-      const isAdminRole = userData?.role === 'Admin';
-      const hasAccess = isSuperAdmin || (isAdminRole && userData?.permissions?.includes('Card Management'));
+      const isAdmin = userData?.role === 'Admin';
+      const hasPermission = userData?.permissions?.includes('Card Management');
       
-      if (!isSuperAdmin && !isAdminRole) {
+      if (!isAdmin) {
         router.replace('/');
         return;
       }
       
-      if (!hasAccess) {
+      if (!hasPermission) {
         router.replace('/admin');
       }
     }
-  }, [userData, user, authLoading, router]);
+  }, [userData, authLoading, router]);
 
   // Fetch last sequence number for the generation section
   const fetchLastNum = useCallback(async (divisionId: string) => {
@@ -140,10 +138,7 @@ export default function CardManagementPage() {
   }, [firestore, exportDivisionId]);
 
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
-  
-  // Super admin bypass check
-  const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-  if (!isSuperAdmin && (!userData || userData.role !== 'Admin')) return null;
+  if (!userData || userData.role !== 'Admin') return null;
 
   const handleGenerateCards = async () => {
     if (!firestore || !selectedDivisionId || quantity < 1) {
@@ -194,7 +189,7 @@ export default function CardManagementPage() {
         pdf.text(`ID: ${cardIdStr}`, pageWidth / 2, 82, { align: "center" });
       }
 
-      logAuditAction(firestore, userData?.name || 'Super Admin', 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
+      logAuditAction(firestore, userData?.name || 'Admin', 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
       pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
       toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
       

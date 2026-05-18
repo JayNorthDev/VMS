@@ -1,3 +1,4 @@
+
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -19,6 +20,7 @@ import {
   Trash2,
   Shield,
   Activity,
+  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -29,7 +31,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useCollection, useMemoFirebase, signOutUser, useFirebase } from '@/firebase';
-import { collection, doc, getDoc, setDoc, deleteDoc, query, orderBy, Timestamp, collectionGroup, where } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { firebaseConfig } from '@/firebase/config';
 import { useToast } from '@/hooks/use-toast';
 import { divisionData, getPrefix } from '@/lib/divisions';
 import type { VisitorEntry, UserProfile, IDCard, AuditLog } from '@/lib/types';
@@ -38,8 +43,6 @@ import { startOfToday, format } from 'date-fns';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
 import { decryptQRData } from '@/lib/qr-security';
-
-const SUPER_ADMIN_EMAIL = 'policevms@admin.com';
 
 const STAFF_PERMISSIONS = ['Check-In', 'Active', 'History'];
 const ADMIN_PERMISSIONS = [
@@ -164,6 +167,8 @@ const ActiveByDivisionView = () => {
   const activeCardsQuery = useMemoFirebase(() => {
     if (!firestore) return null;
     try {
+      // AccessManagement: Rely on collection group index
+      const { collectionGroup } = require('firebase/firestore');
       return query(collectionGroup(firestore, 'cards'), where('status', '==', 'allocated'));
     } catch (e) {
       console.error("Error building collection group query:", e);
@@ -175,7 +180,7 @@ const ActiveByDivisionView = () => {
 
   useEffect(() => {
     if (error && !errorLogged) {
-      console.error("Firestore Index Error detected. Please check if a composite index for 'cards' collection group is required:", error);
+      console.error("Firestore Index Error detected:", error);
       setErrorLogged(true);
     }
   }, [error, errorLogged]);
@@ -198,7 +203,7 @@ const ActiveByDivisionView = () => {
       {error && (
         <Card className="border-destructive bg-destructive/5">
           <CardHeader><CardTitle className="text-destructive text-sm flex items-center gap-2"><BadgeAlert className="h-4 w-4" /> Database Index Required</CardTitle></CardHeader>
-          <CardContent><p className="text-xs opacity-80">This view requires a Firestore Collection Group index. Check the browser console for the creation link if this is the first time viewing this page.</p></CardContent>
+          <CardContent><p className="text-xs opacity-80">This view requires a Firestore Collection Group index.</p></CardContent>
         </Card>
       )}
 
@@ -236,10 +241,12 @@ const AccessManagementView = () => {
   const { firestore } = useFirebase();
   const { toast } = useToast();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState<'Admin' | 'Visitor Management'>('Visitor Management');
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
 
@@ -254,36 +261,60 @@ const AccessManagementView = () => {
 
   const handleSaveUser = async () => {
     if (!firestore) return;
-    if (!name || !email) {
-      toast({ variant: 'destructive', title: 'Missing Info', description: 'Name and Email are required.' });
+    if (!name || !email || (!editingUser && !password)) {
+      toast({ variant: 'destructive', title: 'Missing Info', description: 'Name, Email, and Password (for new users) are required.' });
       return;
     }
 
+    setIsSaving(true);
     try {
-      const userRef = doc(firestore, 'users', editingUser?.id || email.replace(/[@.]/g, '_'));
+      let targetUid = editingUser?.id;
+
+      if (!editingUser) {
+        // AccessManagement: Create real Auth user using secondary instance pattern
+        const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+        targetUid = userCredential.user.uid;
+        
+        // Sign out secondary to keep the main session intact
+        await signOut(secondaryAuth);
+      }
+
+      if (!targetUid) throw new Error("Could not determine user ID");
+
+      const userRef = doc(firestore, 'users', targetUid);
       const userData = { name, email, role, permissions: selectedPermissions };
       await setDoc(userRef, userData, { merge: true });
-      toast({ title: 'User Saved' });
+
+      toast({ title: editingUser ? 'Profile Updated' : 'Account Created Successfully' });
       setIsModalOpen(false);
       resetForm();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving user:', error);
-      toast({ variant: 'destructive', title: 'Error', description: 'Failed to save profile.' });
+      toast({ 
+        variant: 'destructive', 
+        title: 'Error', 
+        description: error.message || 'Failed to save account.' 
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!firestore || !window.confirm('Delete this user account?')) return;
+    if (!firestore || !window.confirm('Delete this user from the database? (Note: This does not delete their Auth record)')) return;
     try {
       await deleteDoc(doc(firestore, 'users', userId));
-      toast({ title: 'User Deleted' });
+      toast({ title: 'User Removed from Database' });
     } catch (error) {
       console.error('Error deleting user:', error);
     }
   };
 
   const resetForm = () => {
-    setName(''); setEmail(''); setRole('Visitor Management'); setSelectedPermissions([]); setEditingUser(null);
+    setName(''); setEmail(''); setPassword(''); setRole('Visitor Management'); setSelectedPermissions([]); setEditingUser(null);
   };
 
   const openEdit = (user: UserProfile) => {
@@ -326,8 +357,18 @@ const AccessManagementView = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>{editingUser ? 'Edit User' : 'Create Account'}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2"><label className="text-sm font-bold">Name</label><Input value={name} onChange={e => setName(e.target.value)} /></div>
-            <div className="space-y-2"><label className="text-sm font-bold">Email</label><Input value={email} onChange={e => setEmail(e.target.value)} disabled={!!editingUser} /></div>
+            <div className="space-y-2"><label className="text-sm font-bold">Full Name</label><Input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" /></div>
+            <div className="space-y-2">
+              <label className="text-sm font-bold">Email Address</label>
+              <Input value={email} onChange={e => setEmail(e.target.value)} disabled={!!editingUser} placeholder="user@example.com" />
+            </div>
+            {!editingUser && (
+              <div className="space-y-2">
+                <label className="text-sm font-bold flex items-center gap-2"><Lock className="h-4 w-4" /> Password</label>
+                <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+                <p className="text-[10px] text-muted-foreground">Minimum 6 characters required for Auth creation.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-bold">System Role</label>
               <Select value={role} onValueChange={(val: any) => setRole(val)}>
@@ -350,7 +391,11 @@ const AccessManagementView = () => {
               </div>
             </div>
           </div>
-          <DialogFooter><Button onClick={handleSaveUser} className="w-full">{editingUser ? 'Update Profile' : 'Create User'}</Button></DialogFooter>
+          <DialogFooter>
+            <Button onClick={handleSaveUser} disabled={isSaving} className="w-full">
+              {isSaving ? "Processing..." : (editingUser ? 'Update Profile' : 'Create Auth Account')}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
@@ -433,17 +478,14 @@ const allNavItems: { id: AdminView; label: string; icon: React.ReactNode; permis
 ];
 
 export default function AdminPage() {
-  const { user, userData, loading: authLoading } = useAuth();
+  const { userData, loading: authLoading } = useAuth();
   const { firestore } = useFirebase();
   const router = useRouter();
 
-  const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
-
   const availableNavItems = useMemo(() => {
-    if (isSuperAdmin) return allNavItems;
     if (!userData?.permissions) return [];
     return allNavItems.filter(item => userData.permissions.includes(item.permission));
-  }, [userData?.permissions, isSuperAdmin]);
+  }, [userData?.permissions]);
   
   const [activeView, setActiveView] = useState<AdminView>('dashboard');
 
@@ -457,13 +499,13 @@ export default function AdminPage() {
   const { data: allVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
 
   useEffect(() => {
-    if (!authLoading && (!userData || userData.role !== 'Admin') && !isSuperAdmin) {
+    if (!authLoading && (!userData || userData.role !== 'Admin')) {
       router.replace('/');
     }
-  }, [userData, authLoading, router, isSuperAdmin]);
+  }, [userData, authLoading, router]);
 
   if (authLoading) return <div className="p-8 text-center">Authenticating...</div>;
-  if (!userData && !isSuperAdmin) return null;
+  if (!userData) return null;
 
   const handleSignOut = async () => { await signOutUser(); router.replace('/'); };
 
@@ -478,7 +520,7 @@ export default function AdminPage() {
     }
   }
 
-  const hasCardManagement = isSuperAdmin || userData?.permissions?.includes('Card Management');
+  const hasCardManagement = userData?.permissions?.includes('Card Management');
 
   return (
     <SidebarProvider>
@@ -509,14 +551,14 @@ export default function AdminPage() {
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter className="p-4 border-t border-sidebar-border/50">
-            {(userData || isSuperAdmin) && (
+            {userData && (
               <div className="flex items-center gap-3 mb-4 p-2 rounded-lg bg-sidebar-accent/30">
                   <div className="w-8 h-8 rounded-full bg-sidebar-accent flex items-center justify-center font-bold text-xs">
-                    {isSuperAdmin ? "SA" : (userData?.name?.charAt(0) || "U")}
+                    {(userData?.name?.charAt(0) || "U")}
                   </div>
                   <div className="flex flex-col overflow-hidden">
-                    <span className="text-xs font-semibold truncate">{isSuperAdmin ? "Super Admin" : userData?.name}</span>
-                    <span className="text-[9px] opacity-50 uppercase">{isSuperAdmin ? "Root Access" : userData?.role}</span>
+                    <span className="text-xs font-semibold truncate">{userData?.name}</span>
+                    <span className="text-[9px] opacity-50 uppercase">{userData?.role}</span>
                   </div>
               </div>
             )}
