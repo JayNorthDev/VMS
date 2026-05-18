@@ -31,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useCollection, useMemoFirebase, signOutUser, useFirebase } from '@/firebase';
-import { collection, doc, getDoc, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, doc, getDoc, setDoc, deleteDoc, query, orderBy, where, collectionGroup } from 'firebase/firestore';
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { firebaseConfig } from '@/firebase/config';
@@ -160,78 +160,96 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
     )
 }
 
-const ActiveByDivisionView = () => {
+const ActiveByDivisionView = ({ allVisitors }: { allVisitors: VisitorEntry[] }) => {
   const { firestore } = useFirebase();
-  const [errorLogged, setErrorLogged] = useState(false);
 
-  const activeCardsQuery = useMemoFirebase(() => {
+  // Denominator: Fetch ALL cards across all sub-collections to determine dynamic capacity per division
+  const allCardsQuery = useMemoFirebase(() => {
     if (!firestore) return null;
-    try {
-      // AccessManagement: Rely on collection group index
-      const { collectionGroup } = require('firebase/firestore');
-      return query(collectionGroup(firestore, 'cards'), where('status', '==', 'allocated'));
-    } catch (e) {
-      console.error("Error building collection group query:", e);
-      return null;
-    }
+    return query(collectionGroup(firestore, 'cards'));
   }, [firestore]);
 
-  const { data: activeCards, isLoading, error } = useCollection<IDCard>(activeCardsQuery);
-
-  useEffect(() => {
-    if (error && !errorLogged) {
-      console.error("Firestore Index Error detected:", error);
-      setErrorLogged(true);
-    }
-  }, [error, errorLogged]);
+  const { data: allCards, isLoading: cardsLoading, error: cardsError } = useCollection<IDCard>(allCardsQuery);
 
   const divisionStats = useMemo(() => {
-    const stats: Record<string, number> = {};
-    divisionData.forEach(d => stats[d.id] = 0);
-    activeCards?.forEach(card => {
-      if (stats[card.divisionId] !== undefined) {
-        stats[card.divisionId]++;
+    const stats: Record<string, { active: number; capacity: number }> = {};
+    divisionData.forEach((d) => {
+      stats[d.id] = { active: 0, capacity: 0 };
+    });
+
+    // Numerator: Active visitors currently in the division
+    allVisitors.filter(v => v.status === 'IN').forEach((v) => {
+      if (stats[v.divisionId]) {
+        stats[v.divisionId].active++;
       }
     });
+
+    // Denominator: Total generated ID cards available for this division
+    allCards?.forEach((card) => {
+      if (stats[card.divisionId]) {
+        stats[card.divisionId].capacity++;
+      }
+    });
+
     return stats;
-  }, [activeCards]);
+  }, [allVisitors, allCards]);
+
+  const isLoading = cardsLoading;
 
   return (
     <div className="space-y-6">
-      <div><h2 className="text-2xl font-bold">Active By Division</h2><p className="text-muted-foreground">Real-time occupancy across all station departments.</p></div>
+      <div>
+        <h2 className="text-2xl font-bold">Active By Division</h2>
+        <p className="text-muted-foreground">Real-time occupancy across all station departments based on generated ID cards.</p>
+      </div>
       
-      {error && (
+      {cardsError && (
         <Card className="border-destructive bg-destructive/5">
-          <CardHeader><CardTitle className="text-destructive text-sm flex items-center gap-2"><BadgeAlert className="h-4 w-4" /> Database Index Required</CardTitle></CardHeader>
-          <CardContent><p className="text-xs opacity-80">This view requires a Firestore Collection Group index.</p></CardContent>
+          <CardHeader>
+            <CardTitle className="text-destructive text-sm flex items-center gap-2">
+              <BadgeAlert className="h-4 w-4" /> Database Index Required
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs opacity-80">
+              {cardsError.message.includes('index') 
+                ? "This view requires a Firestore Collection Group index. Please check the browser console for the direct link to generate it." 
+                : "Unable to retrieve division card counts."}
+            </p>
+          </CardContent>
         </Card>
       )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {divisionData.map(div => (
-          <Card key={div.id} className="overflow-hidden">
-            <div className="h-2" style={{ backgroundColor: div.color }}></div>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-bold leading-tight">{div.en}</CardTitle>
-              <CardDescription className="text-[10px]">{div.si}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between">
-                <div className="text-3xl font-black">{isLoading ? '...' : divisionStats[div.id]}</div>
-                <div className="text-xs opacity-60">/ {div.max} Max Capacity</div>
-              </div>
-              <div className="mt-4 h-2 w-full bg-muted rounded-full overflow-hidden">
-                <div 
-                  className="h-full transition-all duration-500" 
-                  style={{ 
-                    width: `${Math.min((divisionStats[div.id] / div.max) * 100, 100)}%`,
-                    backgroundColor: div.color
-                  }}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {divisionData.map((div) => {
+          const { active, capacity } = divisionStats[div.id];
+          return (
+            <Card key={div.id} className="overflow-hidden">
+              <div className="h-2" style={{ backgroundColor: div.color }}></div>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-bold leading-tight">{div.en}</CardTitle>
+                <CardDescription className="text-[10px]">{div.si}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div className="text-3xl font-black">
+                    {isLoading ? '...' : active}
+                  </div>
+                  <div className="text-xs opacity-60">/ {isLoading ? '...' : capacity} Max Capacity</div>
+                </div>
+                <div className="mt-4 h-2 w-full bg-muted rounded-full overflow-hidden">
+                  <div 
+                    className="h-full transition-all duration-500" 
+                    style={{ 
+                      width: `${capacity > 0 ? Math.min((active / capacity) * 100, 100) : 0}%`,
+                      backgroundColor: div.color
+                    }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );
@@ -271,7 +289,7 @@ const AccessManagementView = () => {
       let targetUid = editingUser?.id;
 
       if (!editingUser) {
-        // AccessManagement: Create real Auth user using secondary instance pattern
+        // Create real Auth user using secondary instance pattern
         const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
         const secondaryAuth = getAuth(secondaryApp);
         
@@ -512,7 +530,7 @@ export default function AdminPage() {
   const renderContent = () => {
     switch (activeView) {
       case 'dashboard': return <DashboardView allVisitors={allVisitors || []} isLoading={visitorsLoading} />;
-      case 'active_visitors': return <ActiveByDivisionView />;
+      case 'active_visitors': return <ActiveByDivisionView allVisitors={allVisitors || []} />;
       case 'access_management': return <AccessManagementView />;
       case 'audit_trail': return <AuditTrailView />;
       case 'history': return <VisitorHistoryView visitors={allVisitors || []} isLoading={visitorsLoading} />;
