@@ -235,7 +235,7 @@ const ActiveByDivisionView = ({ allVisitors }: { allVisitors: VisitorEntry[] }) 
                   <div className="text-3xl font-black">
                     {isLoading ? '...' : active}
                   </div>
-                  <div className="text-xs opacity-60">/ {isLoading ? '...' : capacity} Max Capacity</div>
+                  <div className="text-xs opacity-60">/ {isLoading ? '...' : capacity} Available IDs</div>
                 </div>
                 <div className="mt-4 h-2 w-full bg-muted rounded-full overflow-hidden">
                   <div 
