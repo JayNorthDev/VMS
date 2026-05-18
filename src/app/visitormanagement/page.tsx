@@ -74,7 +74,7 @@ import {
   WithId,
   signOutUser,
 } from '@/firebase';
-import { collection, Timestamp, doc, query, where, getDocs, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, Timestamp, doc, query, where, getDocs, updateDoc, setDoc, collectionGroup, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { QRScanner } from '@/components/qr-scanner';
 import { decryptQRData } from '@/lib/qr-security';
@@ -124,8 +124,11 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
   const [activeSearch, setActiveSearch] = useState('');
   const { firestore } = useFirebase();
 
-  const visitorEntriesQuery = useMemoFirebase(() => (firestore ? collection(firestore, 'visitorEntries') : null), [firestore]);
-  const { data: allVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
+  const visitorEntriesQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'visitorEntries'), where('status', '==', 'IN')) : null), [firestore]);
+  const { data: activeVisitors, isLoading: visitorsLoading } = useCollection<VisitorEntry>(visitorEntriesQuery);
+
+  const historyEntriesQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'visitorEntries'), where('status', '==', 'OUT')) : null), [firestore]);
+  const { data: historyVisitors, isLoading: historyLoading } = useCollection<VisitorEntry>(historyEntriesQuery);
   
   const availableNavItems = useMemo(() => {
     const allItems = [
@@ -142,12 +145,10 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
     }
   }, [availableNavItems, activeTab]);
 
-  const activeVisitors = useMemo(() => allVisitors?.filter((v) => v.status === 'IN') || [], [allVisitors]);
-
   const filteredActiveVisitors = useMemo(() => {
-    if (!activeSearch) return activeVisitors;
+    if (!activeSearch) return activeVisitors || [];
     const term = activeSearch.toLowerCase();
-    return activeVisitors.filter(v => 
+    return (activeVisitors || []).filter(v => 
       v.fullName.toLowerCase().includes(term) || 
       v.identificationNumber.toLowerCase().includes(term) || 
       (v.allocatedCardId || '').toLowerCase().includes(term)
@@ -156,9 +157,9 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
 
   const renderContent = () => {
     switch (activeTab) {
-      case 'in': return <CheckInView getActiveCount={(id) => activeVisitors.filter(v => v.divisionId === id).length} userProfile={userProfile} />;
+      case 'in': return <CheckInView getActiveCount={(id) => (activeVisitors || []).filter(v => v.divisionId === id).length} userProfile={userProfile} />;
       case 'out': return <ActiveVisitorsView visitors={filteredActiveVisitors} isLoading={visitorsLoading} searchValue={activeSearch} onSearchChange={setActiveSearch} userProfile={userProfile} />;
-      case 'history': return <HistoryView visitors={allVisitors?.filter(v => v.status === 'OUT') || []} isLoading={visitorsLoading} />;
+      case 'history': return <HistoryView visitors={historyVisitors || []} isLoading={historyLoading} />;
       default: return null;
     }
   };
@@ -224,21 +225,37 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [tempVisitorData, setTempVisitorData] = useState<any>();
-  const [totalCards, setTotalCards] = useState<number>(0);
+  const [divisionCapacities, setDivisionCapacities] = useState<Record<string, number>>({});
+  const [isLoadingCapacities, setIsLoadingCapacities] = useState(true);
   const { toast } = useToast();
   const { firestore } = useFirebase();
   const [availableCards, setAvailableCards] = useState<IDCard[]>([]);
 
-  const activeCount = selectedDivisionId ? getActiveCount(selectedDivisionId) : 0;
-  const isAtCapacity = selectedDivisionId ? activeCount >= totalCards && totalCards > 0 : false;
-  // If no cards are generated yet, we also treat it as "at capacity" to prevent orphaned check-ins
-  const hasNoCards = selectedDivisionId ? totalCards === 0 : false;
-
+  // Fetch ALL card counts across all divisions upfront
   useEffect(() => {
-    async function fetchDivisionCards() {
+    if (!firestore) return;
+    setIsLoadingCapacities(true);
+    const q = collectionGroup(firestore, 'cards');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const capacities: Record<string, number> = {};
+      snapshot.docs.forEach(doc => {
+        const data = doc.data() as IDCard;
+        capacities[data.divisionId] = (capacities[data.divisionId] || 0) + 1;
+      });
+      setDivisionCapacities(capacities);
+      setIsLoadingCapacities(false);
+    }, (error) => {
+      console.error("Error fetching all cards:", error);
+      setIsLoadingCapacities(false);
+    });
+    return () => unsubscribe();
+  }, [firestore]);
+
+  // Fetch available cards specifically for the selected division
+  useEffect(() => {
+    async function fetchDivisionAvailableCards() {
       if (!firestore || !selectedDivisionId) { 
         setAvailableCards([]); 
-        setTotalCards(0);
         return; 
       }
       try {
@@ -246,21 +263,20 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
         if (!division) return;
         const prefix = getPrefix(division.en);
         const colRef = collection(firestore, 'generated_id_cards', prefix, 'cards');
-        
-        // Fetch all cards for total capacity
-        const totalSnap = await getDocs(colRef);
-        setTotalCards(totalSnap.size);
-
-        // Fetch available cards for selection
         const q = query(colRef, where('status', '==', 'available'));
         const snapshot = await getDocs(q);
         setAvailableCards(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard)));
       } catch (error) {
-        console.error('Error fetching cards:', error);
+        console.error('Error fetching available cards:', error);
       }
     }
-    fetchDivisionCards();
+    fetchDivisionAvailableCards();
   }, [firestore, selectedDivisionId]);
+
+  const activeCount = selectedDivisionId ? getActiveCount(selectedDivisionId) : 0;
+  const totalCards = selectedDivisionId ? divisionCapacities[selectedDivisionId] || 0 : 0;
+  const isAtCapacity = selectedDivisionId ? activeCount >= totalCards && totalCards > 0 : false;
+  const hasNoCards = selectedDivisionId ? !isLoadingCapacities && totalCards === 0 : false;
 
   const handleQRScan = (decodedText: string) => {
     try {
@@ -306,7 +322,6 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   const confirmCheckIn = async () => {
     if (!firestore || !tempVisitorData || isSubmitting) return;
     
-    // Final capacity double-check
     if (isAtCapacity) {
       toast({ 
         variant: 'destructive', 
@@ -405,24 +420,39 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
         </CardContent>
       </Card>
       <Card className="lg:col-span-2">
-        <CardHeader><CardTitle>Select Division</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Select Division</CardTitle><CardDescription>Real-time occupancy and card availability across all branches.</CardDescription></CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {divisionData.map(div => {
             const currentActive = getActiveCount(div.id);
-            const isFull = selectedDivisionId === div.id && isAtCapacity;
+            const totalCardsForDiv = divisionCapacities[div.id] || 0;
+            const isFull = totalCardsForDiv > 0 && currentActive >= totalCardsForDiv;
 
             return (
               <div 
                 key={div.id} 
                 onClick={() => setSelectedDivisionId(div.id)} 
-                className={`p-4 rounded-xl cursor-pointer border-2 transition-all ${selectedDivisionId === div.id ? 'ring-2 ring-blue-500 scale-[1.02]' : 'hover:bg-muted opacity-80'}`} 
+                className={`p-4 rounded-xl cursor-pointer border-2 transition-all relative overflow-hidden ${selectedDivisionId === div.id ? 'ring-2 ring-blue-500 scale-[1.02]' : 'hover:bg-muted opacity-80'}`} 
                 style={{ backgroundColor: div.color, color: div.text }}
               >
-                <div className="font-bold">{div.en}</div>
-                <div className="text-xs opacity-80">{div.si}</div>
-                <div className="mt-4 flex justify-between items-center bg-black/10 p-2 rounded-lg">
-                  <span className="text-[10px] uppercase font-bold">Inside</span>
-                  <span className="font-bold">{currentActive} / {selectedDivisionId === div.id ? totalCards : '...'}</span>
+                <div className="flex justify-between items-start mb-1">
+                  <div className="font-bold leading-tight pr-4">{div.en}</div>
+                  {isFull && <Badge variant="destructive" className="bg-red-600 text-[8px] uppercase px-1 h-4">Full</Badge>}
+                </div>
+                <div className="text-[10px] opacity-80 italic">{div.si}</div>
+                
+                <div className="mt-4 flex justify-between items-center bg-black/10 p-2 rounded-lg border border-white/10">
+                  <span className="text-[10px] uppercase font-bold tracking-tighter">Current Occupancy</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="font-black text-lg">{currentActive}</span>
+                    <span className="text-[10px] opacity-60">/ {isLoadingCapacities ? '...' : totalCardsForDiv} Available IDs</span>
+                  </div>
+                </div>
+
+                <div className="mt-2 h-1 w-full bg-black/10 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${isFull ? 'bg-red-400' : 'bg-white/40'}`}
+                    style={{ width: `${totalCardsForDiv > 0 ? Math.min((currentActive / totalCardsForDiv) * 100, 100) : 0}%` }}
+                  />
                 </div>
               </div>
             );
