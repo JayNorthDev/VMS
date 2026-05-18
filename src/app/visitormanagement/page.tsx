@@ -19,6 +19,7 @@ import {
   Scan,
   QrCode,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -132,8 +133,8 @@ function VisitorManagementLayout({ userProfile }: { userProfile: UserProfile }) 
         { id: 'out', permission: 'Active' },
         { id: 'history', permission: 'History' },
     ];
-    return allItems.filter(item => userProfile.permissions?.includes(item.permission));
-  }, [userProfile?.permissions]);
+    return allItems.filter(item => userProfile.role === 'Admin' || userProfile.permissions?.includes(item.permission));
+  }, [userProfile]);
 
   useEffect(() => {
     if (availableNavItems.length > 0 && !availableNavItems.some(item => item.id === activeTab)) {
@@ -179,7 +180,8 @@ const Navbar = ({ activeTab, setActiveTab, userProfile }: { activeTab: Tab; setA
     { id: 'out', label: 'Active', icon: <Users className="h-4 w-4" />, permission: 'Active' },
     { id: 'history', label: 'History', icon: <Clock className="h-4 w-4" />, permission: 'History' },
   ];
-  const availableNavItems = allNavItems.filter(item => userProfile.permissions?.includes(item.permission));
+  
+  const availableNavItems = allNavItems.filter(item => userProfile.role === 'Admin' || userProfile.permissions?.includes(item.permission));
 
   return (
     <nav className="bg-sidebar text-sidebar-foreground shadow-lg z-10 border-b">
@@ -222,29 +224,42 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [tempVisitorData, setTempVisitorData] = useState<any>();
+  const [totalCards, setTotalCards] = useState<number>(0);
   const { toast } = useToast();
   const { firestore } = useFirebase();
   const [availableCards, setAvailableCards] = useState<IDCard[]>([]);
 
+  const activeCount = selectedDivisionId ? getActiveCount(selectedDivisionId) : 0;
+  const isAtCapacity = selectedDivisionId ? activeCount >= totalCards && totalCards > 0 : false;
+  // If no cards are generated yet, we also treat it as "at capacity" to prevent orphaned check-ins
+  const hasNoCards = selectedDivisionId ? totalCards === 0 : false;
+
   useEffect(() => {
-    async function fetchCards() {
-      if (!firestore || !selectedDivisionId) { setAvailableCards([]); return; }
+    async function fetchDivisionCards() {
+      if (!firestore || !selectedDivisionId) { 
+        setAvailableCards([]); 
+        setTotalCards(0);
+        return; 
+      }
       try {
         const division = divisionData.find(d => d.id === selectedDivisionId);
         if (!division) return;
         const prefix = getPrefix(division.en);
+        const colRef = collection(firestore, 'generated_id_cards', prefix, 'cards');
         
-        const q = query(
-          collection(firestore, 'generated_id_cards', prefix, 'cards'), 
-          where('status', '==', 'available')
-        );
+        // Fetch all cards for total capacity
+        const totalSnap = await getDocs(colRef);
+        setTotalCards(totalSnap.size);
+
+        // Fetch available cards for selection
+        const q = query(colRef, where('status', '==', 'available'));
         const snapshot = await getDocs(q);
         setAvailableCards(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as IDCard)));
       } catch (error) {
-        console.error('Error fetching available cards:', error);
+        console.error('Error fetching cards:', error);
       }
     }
-    fetchCards();
+    fetchDivisionCards();
   }, [firestore, selectedDivisionId]);
 
   const handleQRScan = (decodedText: string) => {
@@ -256,7 +271,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       }
       const [cardId, divisionId] = decrypted.split('|');
       if (divisionId !== selectedDivisionId) {
-        toast({ variant: 'destructive', title: 'Wrong Division', description: 'Card mismatch.' });
+        toast({ variant: 'destructive', title: 'Wrong Division', description: 'This card belongs to a different division.' });
         return;
       }
       form.setValue('allocatedCardId', cardId);
@@ -273,7 +288,17 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   });
 
   const onSubmit = (values: CheckInFormValues) => {
-    if (!selectedDivisionId) { toast({ variant: 'destructive', title: 'Required', description: 'Select a division.' }); return; }
+    if (!selectedDivisionId) { toast({ variant: 'destructive', title: 'Required', description: 'Please select a division first.' }); return; }
+    
+    if (isAtCapacity || hasNoCards) {
+      toast({ 
+        variant: 'destructive', 
+        title: 'Capacity Reached', 
+        description: 'Cannot check in visitor. All generated ID cards for this division are currently in use. Please wait for a visitor to Check-Out.' 
+      });
+      return;
+    }
+
     setTempVisitorData({ ...values, divisionId: selectedDivisionId });
     setIsModalOpen(true);
   };
@@ -281,6 +306,17 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
   const confirmCheckIn = async () => {
     if (!firestore || !tempVisitorData || isSubmitting) return;
     
+    // Final capacity double-check
+    if (isAtCapacity) {
+      toast({ 
+        variant: 'destructive', 
+        title: 'Capacity Reached', 
+        description: 'Cannot check in visitor. All generated ID cards for this division are currently in use. Please wait for a visitor to Check-Out.' 
+      });
+      setIsModalOpen(false);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const division = divisionData.find(d => d.id === tempVisitorData.divisionId)!;
@@ -346,14 +382,24 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
               )} />
               <FormField control={form.control} name="allocatedCardId" render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="flex justify-between items-center">Card Allocation <Button type="button" variant="ghost" size="sm" onClick={() => setIsScanning(true)} disabled={!selectedDivisionId}><QrCode className="h-4 w-4 mr-1"/> Scan</Button></FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder={availableCards.length ? "Select card..." : "No cards available"} /></SelectTrigger></FormControl>
+                  <FormLabel className="flex justify-between items-center">Card Allocation <Button type="button" variant="ghost" size="sm" onClick={() => setIsScanning(true)} disabled={!selectedDivisionId || isAtCapacity}><QrCode className="h-4 w-4 mr-1"/> Scan</Button></FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value} disabled={isAtCapacity || hasNoCards}>
+                    <FormControl><SelectTrigger><SelectValue placeholder={isAtCapacity ? "Division Full" : hasNoCards ? "No Cards Generated" : availableCards.length ? "Select card..." : "Loading..."} /></SelectTrigger></FormControl>
                     <SelectContent>{availableCards.map(c => <SelectItem key={c.id} value={c.cardId}>{c.cardId}</SelectItem>)}</SelectContent>
                   </Select>
                 </FormItem>
               )} />
-              <Button type="submit" className="w-full">Review & Check In</Button>
+              
+              {isAtCapacity && (
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-orange-50 text-orange-800 border border-orange-100">
+                  <AlertCircle className="h-4 w-4" />
+                  <p className="text-[10px] font-medium leading-tight">All generated ID cards for this division are currently in use.</p>
+                </div>
+              )}
+
+              <Button type="submit" className="w-full" disabled={isAtCapacity || hasNoCards}>
+                {isAtCapacity ? "Capacity Reached" : hasNoCards ? "Setup Cards in Admin" : "Review & Check In"}
+              </Button>
             </form>
           </Form>
         </CardContent>
@@ -361,16 +407,26 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
       <Card className="lg:col-span-2">
         <CardHeader><CardTitle>Select Division</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {divisionData.map(div => (
-            <div key={div.id} onClick={() => setSelectedDivisionId(div.id)} className={`p-4 rounded-xl cursor-pointer border-2 transition-all ${selectedDivisionId === div.id ? 'ring-2 ring-blue-500 scale-[1.02]' : 'hover:bg-muted'}`} style={{ backgroundColor: div.color, color: div.text }}>
-              <div className="font-bold">{div.en}</div>
-              <div className="text-xs opacity-80">{div.si}</div>
-              <div className="mt-4 flex justify-between items-center bg-black/10 p-2 rounded-lg">
-                <span className="text-[10px] uppercase font-bold">Inside</span>
-                <span className="font-bold">{getActiveCount(div.id)} / {div.max}</span>
+          {divisionData.map(div => {
+            const currentActive = getActiveCount(div.id);
+            const isFull = selectedDivisionId === div.id && isAtCapacity;
+
+            return (
+              <div 
+                key={div.id} 
+                onClick={() => setSelectedDivisionId(div.id)} 
+                className={`p-4 rounded-xl cursor-pointer border-2 transition-all ${selectedDivisionId === div.id ? 'ring-2 ring-blue-500 scale-[1.02]' : 'hover:bg-muted opacity-80'}`} 
+                style={{ backgroundColor: div.color, color: div.text }}
+              >
+                <div className="font-bold">{div.en}</div>
+                <div className="text-xs opacity-80">{div.si}</div>
+                <div className="mt-4 flex justify-between items-center bg-black/10 p-2 rounded-lg">
+                  <span className="text-[10px] uppercase font-bold">Inside</span>
+                  <span className="font-bold">{currentActive} / {selectedDivisionId === div.id ? totalCards : '...'}</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
       {isScanning && (
@@ -382,12 +438,21 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
           </DialogContent>
         </Dialog>
       )}
-      {isModalOpen && tempVisitorData && <VerificationModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onConfirm={confirmCheckIn} visitorData={tempVisitorData} isSubmitting={isSubmitting} />}
+      {isModalOpen && tempVisitorData && (
+        <VerificationModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+          onConfirm={confirmCheckIn} 
+          visitorData={tempVisitorData} 
+          isSubmitting={isSubmitting} 
+          isAtCapacity={isAtCapacity}
+        />
+      )}
     </div>
   );
 };
 
-const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData, isSubmitting }: any) => {
+const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData, isSubmitting, isAtCapacity }: any) => {
   const division = divisionData.find(d => d.id === visitorData.divisionId)!;
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -400,8 +465,8 @@ const VerificationModal = ({ isOpen, onClose, onConfirm, visitorData, isSubmitti
         </div>
         <DialogFooter className="gap-2">
           <Button variant="ghost" onClick={onClose} className="bg-white/10 hover:bg-white/20 text-white" disabled={isSubmitting}>Edit</Button>
-          <Button onClick={onConfirm} className="bg-white text-primary font-bold" disabled={isSubmitting}>
-            {isSubmitting ? (
+          <Button onClick={onConfirm} className="bg-white text-primary font-bold" disabled={isSubmitting || isAtCapacity}>
+            {isAtCapacity ? "Division Full" : isSubmitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Checking In...
