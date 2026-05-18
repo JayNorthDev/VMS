@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -431,7 +430,7 @@ const CheckInView = ({ getActiveCount, userProfile }: { getActiveCount: (id: str
               <div 
                 key={div.id} 
                 onClick={() => setSelectedDivisionId(div.id)} 
-                className={`p-4 rounded-xl cursor-pointer border-2 transition-all relative overflow-hidden ${selectedDivisionId === div.id ? 'ring-2 ring-blue-500 scale-[1.02]' : 'hover:bg-muted opacity-80'}`} 
+                className={`p-4 rounded-xl cursor-pointer border-2 transition-all relative overflow-hidden ${selectedDivisionId === div.id ? 'ring-4 ring-offset-2 ring-blue-500 scale-[1.02]' : 'hover:shadow-md'}`} 
                 style={{ backgroundColor: div.color, color: div.text }}
               >
                 <div className="flex justify-between items-start mb-1">
