@@ -13,9 +13,11 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const regionId = 'qr-reader';
   const isStopping = useRef(false);
+  const isInitializing = useRef(false);
 
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || isInitializing.current) return;
+    isInitializing.current = true;
 
     // Initialize scanner instance
     const html5QrCode = new Html5Qrcode(regionId);
@@ -32,19 +34,19 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
             onScanSuccess(decodedText);
           },
           (errorMessage) => {
-            // Optional: Handle frame errors
             if (onScanError) onScanError(errorMessage);
           }
         );
       } catch (err) {
         console.error('Failed to start scanner:', err);
+      } finally {
+        isInitializing.current = false;
       }
     };
 
     startScanner();
 
     return () => {
-      // Robust cleanup to prevent AbortError and DOM manipulation issues
       const stopAndClear = async () => {
         if (isStopping.current) return;
         isStopping.current = true;
@@ -55,18 +57,23 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
               await scannerRef.current.stop();
             }
           } catch (err) {
-            // Silently handle cases where the scanner might have already been stopped
             console.warn('Scanner stop warning:', err);
           }
 
           try {
-            // Clear the internal state of the library before the DOM node is removed by React
+            // Important: clear internal state
             scannerRef.current.clear();
           } catch (err) {
             console.warn('Scanner clear warning:', err);
           } finally {
             scannerRef.current = null;
             isStopping.current = false;
+            
+            // Explicitly clear DOM to prevent duplicates in Strict Mode
+            const el = document.getElementById(regionId);
+            if (el) {
+              el.innerHTML = "";
+            }
           }
         }
       };

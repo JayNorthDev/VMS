@@ -59,10 +59,11 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
     const [scannedCard, setScannedCard] = useState<{ card: IDCard, visitor?: VisitorEntry | null } | null>(null);
     const { toast } = useToast();
 
-    const handleCloseScanner = useCallback(async () => {
-      setIsVerifying(false);
-      // Give camera hardware time to release
-      await new Promise(resolve => setTimeout(resolve, 300));
+    const handleCloseScanner = useCallback(() => {
+      // Don't close immediately. Wait for camera hardware release.
+      setTimeout(() => {
+        setIsVerifying(false);
+      }, 500);
     }, []);
 
     const handleVerifyScan = async (decodedText: string) => {
@@ -73,8 +74,8 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
           return;
         }
 
-        // 1. Stop scanner UI first
-        await handleCloseScanner();
+        // 1. Stop scanner UI first (with hardware release delay)
+        handleCloseScanner();
 
         const [cardId, divisionId] = decrypted.split('|');
         if (!firestore) return;
@@ -170,7 +171,6 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
 const ActiveByDivisionView = ({ allVisitors }: { allVisitors: VisitorEntry[] }) => {
   const { firestore } = useFirebase();
 
-  // Denominator: Fetch ALL cards across all sub-collections to determine dynamic capacity per division
   const allCardsQuery = useMemoFirebase(() => {
     if (!firestore) return null;
     return query(collectionGroup(firestore, 'cards'));
@@ -184,14 +184,12 @@ const ActiveByDivisionView = ({ allVisitors }: { allVisitors: VisitorEntry[] }) 
       stats[d.id] = { active: 0, capacity: 0 };
     });
 
-    // Numerator: Active visitors currently in the division
     allVisitors.filter(v => v.status === 'IN').forEach((v) => {
       if (stats[v.divisionId]) {
         stats[v.divisionId].active++;
       }
     });
 
-    // Denominator: Total generated ID cards available for this division
     allCards?.forEach((card) => {
       if (stats[card.divisionId]) {
         stats[card.divisionId].capacity++;
@@ -296,14 +294,12 @@ const AccessManagementView = () => {
       let targetUid = editingUser?.id;
 
       if (!editingUser) {
-        // Create real Auth user using secondary instance pattern
         const secondaryApp = getApps().find(app => app.name === 'Secondary') || initializeApp(firebaseConfig, 'Secondary');
         const secondaryAuth = getAuth(secondaryApp);
         
         const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
         targetUid = userCredential.user.uid;
         
-        // Sign out secondary to keep the main session intact
         await signOut(secondaryAuth);
       }
 
