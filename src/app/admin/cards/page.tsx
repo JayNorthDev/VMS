@@ -26,7 +26,6 @@ import { logAuditAction } from '@/lib/audit';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { SidebarProvider } from '@/components/ui/sidebar';
-import jsPDF from 'jspdf';
 import QRCode from 'qrcode';
 import Image from 'next/image';
 import JSZip from 'jszip';
@@ -152,10 +151,6 @@ export default function CardManagementPage() {
     const cardsCol = collection(firestore, 'generated_id_cards', prefix, 'cards');
     
     try {
-      const pdf = new jsPDF('p', 'mm', [85.6, 54]);
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-
       for (let i = 1; i <= quantity; i++) {
         const currentNum = lastSequence + i;
         const cardIdStr = `${prefix}-${currentNum.toString().padStart(3, '0')}`;
@@ -171,27 +166,10 @@ export default function CardManagementPage() {
         };
 
         await setDoc(doc(cardsCol, cardIdStr), cardData);
-
-        if (i > 1) pdf.addPage();
-        pdf.setFillColor(division.color);
-        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
-        pdf.setTextColor(division.text === '#FFFFFF' ? 255 : 0);
-        pdf.setFontSize(8);
-        pdf.setFont("helvetica", "bold");
-        pdf.text("VISITOR ID CARD", pageWidth / 2, 10, { align: "center" });
-        pdf.setFontSize(24);
-        pdf.text(currentNum.toString().padStart(2, '0'), pageWidth / 2, 35, { align: "center" });
-        pdf.setFontSize(6);
-        pdf.text(division.en, pageWidth / 2, 45, { align: "center" });
-        const qrUrl = await QRCode.toDataURL(qrData, { margin: 1 });
-        pdf.addImage(qrUrl, 'PNG', (pageWidth / 2) - 15, 50, 30, 30);
-        pdf.setFontSize(4);
-        pdf.text(`ID: ${cardIdStr}`, pageWidth / 2, 82, { align: "center" });
       }
 
       logAuditAction(firestore, userData?.name || 'Admin', 'Batch Cards Generated', `Generated ${quantity} cards for ${division.en}. Sequence start: ${lastSequence + 1}`);
-      pdf.save(`Cards_${division.en.replace(/\s+/g, '_')}_${new Date().getTime()}.pdf`);
-      toast({ title: 'Success', description: `${quantity} cards generated and PDF downloaded.` });
+      toast({ title: 'Success', description: `${quantity} cards have been generated and saved to the database.` });
       
       setQuantity(1);
       fetchLastNum(selectedDivisionId);
@@ -290,7 +268,7 @@ export default function CardManagementPage() {
                   Section A: Batch Generation
                 </CardTitle>
                 <CardDescription>
-                  Create NEW ID card records in the database and download a printable PDF.
+                  Create NEW ID card records in the database.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -334,7 +312,7 @@ export default function CardManagementPage() {
                 >
                   {isGenerating ? "Processing..." : (
                     <>
-                      <Download className="mr-2 h-5 w-5" /> Generate & Download PDF
+                      <Download className="mr-2 h-5 w-5" /> Generate Cards
                     </>
                   )}
                 </Button>
@@ -453,7 +431,6 @@ export default function CardManagementPage() {
             <div className="bg-muted/50 rounded-lg p-4 border text-xs text-muted-foreground space-y-2">
               <p className="font-semibold text-primary">Printing Notes:</p>
               <ul className="list-disc pl-4 space-y-1">
-                <li>PDF format is optimized for direct A4/Letter printers.</li>
                 <li>ZIP format is recommended for BarTender, Zebra, or Epson dedicated label printers.</li>
                 <li>QR codes in ZIP are high-resolution (1024x1024) for optimal scanning.</li>
               </ul>
