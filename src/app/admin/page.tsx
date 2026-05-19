@@ -1,6 +1,5 @@
-
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import {
@@ -60,6 +59,12 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
     const [scannedCard, setScannedCard] = useState<{ card: IDCard, visitor?: VisitorEntry | null } | null>(null);
     const { toast } = useToast();
 
+    const handleCloseScanner = useCallback(async () => {
+      setIsVerifying(false);
+      // Give camera hardware time to release
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }, []);
+
     const handleVerifyScan = async (decodedText: string) => {
       try {
         const decrypted = decryptQRData(decodedText);
@@ -67,9 +72,11 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
           toast({ variant: 'destructive', title: 'Security Alert', description: 'This card was not issued by this station.' });
           return;
         }
+
+        // 1. Stop scanner UI first
+        await handleCloseScanner();
+
         const [cardId, divisionId] = decrypted.split('|');
-        setIsVerifying(false);
-        
         if (!firestore) return;
 
         const division = divisionData.find(d => d.id === divisionId);
@@ -118,7 +125,7 @@ const DashboardView = ({ allVisitors, isLoading }: { allVisitors: VisitorEntry[]
             </div>
 
             {isVerifying && (
-              <Dialog open={isVerifying} onOpenChange={setIsVerifying}>
+              <Dialog open={isVerifying} onOpenChange={(open) => { if(!open) handleCloseScanner(); }}>
                 <DialogContent className="sm:max-w-md">
                   <DialogHeader><DialogTitle>Scan ID Card</DialogTitle><DialogDescription>Hold the card QR code in front of the camera.</DialogDescription></DialogHeader>
                   <QRScanner onScanSuccess={handleVerifyScan} />
@@ -375,15 +382,15 @@ const AccessManagementView = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>{editingUser ? 'Edit User' : 'Create Account'}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2"><label className="text-sm font-bold">Full Name</label><Input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" /></div>
+            <div className="space-y-2"><label className="text-sm font-bold">Full Name</label><Input value={name || ''} onChange={e => setName(e.target.value)} placeholder="John Doe" /></div>
             <div className="space-y-2">
               <label className="text-sm font-bold">Email Address</label>
-              <Input value={email} onChange={e => setEmail(e.target.value)} disabled={!!editingUser} placeholder="user@example.com" />
+              <Input value={email || ''} onChange={e => setEmail(e.target.value)} disabled={!!editingUser} placeholder="user@example.com" />
             </div>
             {!editingUser && (
               <div className="space-y-2">
                 <label className="text-sm font-bold flex items-center gap-2"><Lock className="h-4 w-4" /> Password</label>
-                <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+                <Input type="password" value={password || ''} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
                 <p className="text-[10px] text-muted-foreground">Minimum 6 characters required for Auth creation.</p>
               </div>
             )}

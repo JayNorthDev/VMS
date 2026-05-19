@@ -12,6 +12,7 @@ interface QRScannerProps {
 export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const regionId = 'qr-reader';
+  const isStopping = useRef(false);
 
   useEffect(() => {
     if (!isActive) return;
@@ -31,6 +32,7 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
             onScanSuccess(decodedText);
           },
           (errorMessage) => {
+            // Optional: Handle frame errors
             if (onScanError) onScanError(errorMessage);
           }
         );
@@ -43,23 +45,32 @@ export function QRScanner({ onScanSuccess, onScanError, isActive = true }: QRSca
 
     return () => {
       // Robust cleanup to prevent AbortError and DOM manipulation issues
-      const cleanup = async () => {
+      const stopAndClear = async () => {
+        if (isStopping.current) return;
+        isStopping.current = true;
+
         if (scannerRef.current) {
           try {
             if (scannerRef.current.isScanning) {
               await scannerRef.current.stop();
             }
+          } catch (err) {
+            // Silently handle cases where the scanner might have already been stopped
+            console.warn('Scanner stop warning:', err);
+          }
+
+          try {
             // Clear the internal state of the library before the DOM node is removed by React
             scannerRef.current.clear();
           } catch (err) {
-            // Silently handle cases where the scanner might have already been stopped
-            console.warn('Scanner cleanup warning:', err);
+            console.warn('Scanner clear warning:', err);
           } finally {
             scannerRef.current = null;
+            isStopping.current = false;
           }
         }
       };
-      cleanup();
+      stopAndClear();
     };
   }, [isActive, onScanSuccess, onScanError]);
 
